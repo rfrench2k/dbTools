@@ -1,0 +1,19 @@
+# Sensitive configuration (contains credentials)
+config.php
+interbase/ib-config.json
+
+# Backup files
+backups/
+*.sql
+
+# IDE and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+error_log

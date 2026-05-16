@@ -1,0 +1,238 @@
+/* Database Management Tools - Custom Styles */
+
+:root {
+    --danger-soft: #fee;
+    --warning-soft: #ffc;
+    --success-soft: #efe;
+    --info-soft: #eff;
+}
+
+body {
+    background-color: #f8f9fa;
+}
+
+.border-dashed {
+    border: 2px dashed #dee2e6 !important;
+}
+
+/* Loading spinner */
+.spinner-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.spinner-overlay.show {
+    display: flex;
+}
+
+/* Database status badges */
+.db-status-badge {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+}
+
+/* Comparison results */
+.comparison-section {
+    margin-bottom: 1.5rem;
+}
+
+.object-item {
+    border-left: 4px solid #dee2e6;
+    margin-bottom: 0.5rem;
+    transition: all 0.2s;
+}
+
+.object-item:hover {
+    box-shadow: 0 0.25rem 0.5rem rgba(0,0,0,0.1);
+}
+
+.object-item.status-missing-in-prod {
+    border-left-color: #dc3545;
+    background-color: var(--danger-soft);
+}
+
+.object-item.status-missing-in-test {
+    border-left-color: #fd7e14;
+    background-color: var(--warning-soft);
+}
+
+.object-item.status-different {
+    border-left-color: #ffc107;
+    background-color: var(--warning-soft);
+}
+
+.object-item.status-identical {
+    border-left-color: #28a745;
+    background-color: var(--success-soft);
+}
+
+/* Difference details */
+.difference-list {
+    margin: 0;
+    padding-left: 1.5rem;
+    font-size: 0.875rem;
+}
+
+.difference-list li {
+    margin-bottom: 0.25rem;
+}
+
+/* Structure comparison table */
+.structure-comparison {
+    font-size: 0.875rem;
+}
+
+.structure-comparison th {
+    background-color: #e9ecef;
+    font-weight: 600;
+}
+
+.structure-comparison td {
+    vertical-align: middle;
+}
+
+.col-diff {
+    background-color: #fff3cd;
+}
+
+/* Risk assessment */
+.risk-high {
+    background-color: var(--danger-soft);
+    border-left: 4px solid #dc3545;
+}
+
+.risk-medium {
+    background-color: var(--warning-soft);
+    border-left: 4px solid #ffc107;
+}
+
+.risk-low {
+    background-color: var(--success-soft);
+    border-left: 4px solid #28a745;
+}
+
+/* Summary cards */
+.summary-card {
+    text-align: center;
+    padding: 1rem;
+}
+
+.summary-card .display-4 {
+    font-size: 2.5rem;
+    font-weight: 600;
+}
+
+/* Collapsible sections */
+.collapse-toggle {
+    cursor: pointer;
+    user-select: none;
+}
+
+.collapse-toggle:hover {
+    background-color: #f8f9fa;
+}
+
+.collapse-toggle::before {
+    content: '\25BC';
+    display: inline-block;
+    margin-right: 0.5rem;
+    transition: transform 0.2s;
+    font-size: 0.75rem;
+}
+
+.collapse-toggle.collapsed::before {
+    transform: rotate(-90deg);
+}
+
+/* Code blocks */
+.code-block {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 0.25rem;
+    padding: 0.75rem;
+    font-family: 'Courier New', monospace;
+    font-size: 0.875rem;
+    overflow-x: auto;
+    max-height: 400px;
+}
+
+/* Progress indicators */
+.progress-step {
+    margin-bottom: 1rem;
+}
+
+.progress-step .step-icon {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #e9ecef;
+    margin-right: 0.5rem;
+}
+
+.progress-step.complete .step-icon {
+    background-color: #28a745;
+    color: white;
+}
+
+.progress-step.active .step-icon {
+    background-color: #007bff;
+    color: white;
+}
+
+.progress-step.error .step-icon {
+    background-color: #dc3545;
+    color: white;
+}
+
+/* Buttons */
+.btn-copy {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+}
+
+/* Alerts */
+.alert-dismissible {
+    padding-right: 3rem;
+}
+
+/* Row count badge */
+.row-count-badge {
+    font-size: 0.75rem;
+    margin-left: 0.5rem;
+}
+
+/* Empty state */
+.empty-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: #6c757d;
+}
+
+.empty-state svg {
+    width: 4rem;
+    height: 4rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .summary-card .display-4 {
+        font-size: 2rem;
+    }
+
+    .structure-comparison {
+        font-size: 0.75rem;
+    }
+}

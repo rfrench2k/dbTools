@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="95" fill="#ffffff" stroke="#1e40af" stroke-width="3"/>
+  
+  <!-- Database cylinders - proper layering -->
+  <!-- All back (dark) ellipses first -->
+  <ellipse cx="100" cy="88" rx="60" ry="18" fill="#1e3a8a"/>
+  <ellipse cx="100" cy="112" rx="60" ry="18" fill="#1e3a8a"/>
+  <ellipse cx="100" cy="136" rx="60" ry="18" fill="#1e3a8a"/>
+  
+  <!-- Then all rectangles (sides) -->
+  <rect x="40" y="60" width="120" height="28" fill="#1e40af"/>
+  <rect x="40" y="88" width="120" height="24" fill="#1e40af"/>
+  <rect x="40" y="112" width="120" height="24" fill="#1e40af"/>
+  
+  <!-- Finally all front (light) ellipses on top -->
+  <ellipse cx="100" cy="60" rx="60" ry="18" fill="#2563eb" stroke="#dbeafe" stroke-width="3"/>
+  <ellipse cx="100" cy="88" rx="60" ry="18" fill="#2563eb" stroke="#dbeafe" stroke-width="3"/>
+  <ellipse cx="100" cy="112" rx="60" ry="18" fill="#2563eb" stroke="#dbeafe" stroke-width="3"/>
+  <ellipse cx="100" cy="136" rx="60" ry="18" fill="#2563eb" stroke="#dbeafe" stroke-width="3"/>
+</svg>

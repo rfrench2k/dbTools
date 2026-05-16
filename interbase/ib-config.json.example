@@ -1,0 +1,28 @@
+{
+    "tools":  {
+                  "gbak":  "C:\\Program Files\\Embarcadero\\InterBase\\bin\\gbak.exe",
+                  "gfix":  "C:\\Program Files\\Embarcadero\\InterBase\\bin\\gfix.exe"
+              },
+    "backupDir":  "D:\\Dumps\\Interbase",
+    "environments":  {
+                         "prod":  {
+                                      "host":  "your-prod-host",
+                                      "user":  "SYSDBA",
+                                      "password":  "your_password"
+                                  },
+                         "test":  {
+                                      "host":  "localhost",
+                                      "user":  "SYSDBA",
+                                      "password":  "your_password"
+                                  }
+                     },
+    "databases":  [
+                      {
+                          "id":  "exampledb",
+                          "name":  "EXAMPLEDB",
+                          "description":  "Example database (Prod to Test refresh)",
+                          "prodPath":  "D:\\path\\to\\EXAMPLEDB.IB",
+                          "testPath":  "D:\\path\\to\\EXAMPLEDB.IB"
+                      }
+                  ]
+}
