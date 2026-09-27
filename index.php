@@ -51,6 +51,17 @@ include $headerFile;
         <div class="tab-content" id="toolTabsContent">
             <div class="tab-pane fade show active" id="mysql" role="tabpanel" aria-labelledby="mysql-tab" tabindex="0">
                 <div class="row g-4">
+                    <div class="col-12">
+                        <div class="card shadow-sm border-primary">
+                            <div class="card-body d-flex flex-wrap align-items-center gap-3">
+                                <div class="flex-grow-1">
+                                    <h5 class="card-title mb-1"><i class="bi bi-cloud-check"></i> Nightly Backup (Google Drive)</h5>
+                                    <p class="card-text mb-0">What is backed up every night, when each app was last copied, what is NOT backed up, and how to restore.</p>
+                                </div>
+                                <a href="nightly-backup.php" class="btn btn-primary"><i class="bi bi-cloud-check"></i> Open Nightly Backup</a>
+                            </div>
+                        </div>
+                    </div>
                     <div class="col-md-6">
                         <div class="card h-100 shadow-sm border-primary">
                             <div class="card-body">
@@ -82,20 +93,18 @@ include $headerFile;
                             <div class="card-body">
                                 <div class="d-flex align-items-center mb-3">
                                     <div class="flex-grow-1">
-                                        <h5 class="card-title mb-0"><i class="bi bi-database-fill-down"></i> Database Backup Tool</h5>
+                                        <h5 class="card-title mb-0"><i class="bi bi-database-fill-down"></i> Manual Backup Tool</h5>
                                     </div>
                                     <span class="badge bg-success">Active</span>
                                 </div>
                                 <p class="card-text">
-                                    Create on-demand backups of PROD databases with proper mysqldump flags. Includes stored
-                                    procedures, triggers, and all database objects. Scheduled backups run daily at 4am with a
-                                    GFS retention policy.
+                                    Make a one-off backup of a database to d:\dumps\ with proper mysqldump flags (stored
+                                    procedures, triggers, all objects). The automatic nightly backup is separate: see
+                                    <a href="nightly-backup.php">Nightly Backup</a>.
                                 </p>
                                 <ul class="list-unstyled small">
                                     <li><strong>✓</strong> Full database backup with all objects</li>
                                     <li><strong>✓</strong> Proper flags: --routines, --triggers, --single-transaction</li>
-                                    <li><strong>✓</strong> Scheduled daily backups (4am)</li>
-                                    <li><strong>✓</strong> GFS retention: 30 daily, 12 monthly, yearly</li>
                                     <li><strong>✓</strong> Backup location: d:\dumps\</li>
                                 </ul>
                                 <a href="backup-tool.php" class="btn btn-success mt-3"><i class="bi bi-download"></i> Open Backup Tool</a>

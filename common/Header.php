@@ -92,6 +92,9 @@ echo getNavbarUserModalsHTML('DBTOOLS');
                         <li><a class="dropdown-item" href="/dbtools/db-compare.php">
                             <i class="bi bi-columns-gap"></i> Database Comparison
                         </a></li>
+                        <li><a class="dropdown-item" href="/dbtools/nightly-backup.php">
+                            <i class="bi bi-cloud-check"></i> Nightly Backup (Google Drive)
+                        </a></li>
                         <li><a class="dropdown-item" href="/dbtools/backup-tool.php">
                             <i class="bi bi-database-fill-down"></i> Backup Tool
                         </a></li>
