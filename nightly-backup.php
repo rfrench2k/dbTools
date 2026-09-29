@@ -1,217 +1,215 @@
 <?php
-// Nightly backup: what the "Backup - Nightly" task (D:\AdvancedVentures\BackupJob) backs up, when it last ran,
-// and what is NOT backed up - and the controls to change it (ajax-nightly-backup.php edits backup.json and
-// queues runs for the "Backup - On Demand" task). Reads backup.json, state\*.json and logs\*.log.
+// Nightly Backup (D:\AdvancedVentures\BackupJob\backup.php): its settings, servers, apps and what each backs up -
+// every one a row in the tools database (backup_* tables) that can be added, changed or removed here through
+// ajax-nightly-backup.php - plus the run history, what is NOT backed up, and Run now.
 $pageTitle = 'Nightly Backup';
 include $_SERVER['DOCUMENT_ROOT'] . '/dbtools/common/Header.php';
 include_once $_SERVER['DOCUMENT_ROOT'] . '/auth/includes/csrf_functions.php';
+require __DIR__ . '/nightly-backup-db.php';
 $csrf = generateCSRFToken();
 
-$jobDir = 'D:/AdvancedVentures/BackupJob';
-$cfg = json_decode((string)@file_get_contents("$jobDir/backup.json"), true) ?: [];
-$apps = $cfg['apps'] ?? [];
-$inventory = json_decode((string)@file_get_contents("$jobDir/state/inventory.json"), true) ?: [];
-$runStatus = json_decode((string)@file_get_contents("$jobDir/state/run-status.json"), true);
-$queued = json_decode((string)@file_get_contents("$jobDir/state/run-request.json"), true);
-if ($runStatus && !empty($runStatus['running']) && strtotime($runStatus['started']) < time() - 6 * 3600) $runStatus['running'] = false;
-
-// Server key -> [kind, label]
-$serverInfo = [];
-foreach ($cfg['mysql_servers'] ?? [] as $k => $s) $serverInfo[$k] = ['mysql', ($k === 'mysql95' ? 'MySQL 9.5' : ($k === 'mysql84' ? 'MySQL 8.4' : $k)) . " (port {$s['port']})"];
-foreach ($cfg['postgres_servers'] ?? [] as $k => $s) $serverInfo[$k] = ['postgres', "Postgres (port {$s['port']})"];
-foreach ($cfg['qdrant_servers'] ?? [] as $k => $s) $serverInfo[$k] = ['qdrant', 'Qdrant'];
-
-// Databases that are deliberately not in backup.json, with the reason shown on the page.
-$ownBackup = ['movies' => 'Has its own backup (task "Movies - Database Backup").',
-              'unraveled_req' => 'Left out on purpose (owner decision, 2026-09-27).'];
-
 function nb_h($s) { return htmlspecialchars((string)$s, ENT_QUOTES); }
-function nb_when($iso) {
-    if (!$iso) return '<span class="text-muted">never</span>';
-    $t = strtotime($iso);
-    return nb_h(date('M j, Y g:i a', $t)) . ' <span class="text-muted small">(' . nb_h(nb_ago($t)) . ')</span>';
+function nb_when($d) {
+    if (!$d) return '<span class="text-muted">never</span>';
+    $t = strtotime($d);
+    $ago = time() - $t;
+    $rel = $ago < 3600 ? max(1, (int)($ago / 60)) . ' min ago' : ($ago < 172800 ? (int)($ago / 3600) . ' h ago' : (int)($ago / 86400) . ' days ago');
+    return nb_h(date('M j, Y g:i a', $t)) . ' <span class="text-muted small">(' . $rel . ')</span>';
 }
-function nb_ago($t) {
-    $d = time() - $t;
-    if ($d < 3600) return max(1, (int)($d / 60)) . ' min ago';
-    if ($d < 172800) return (int)($d / 3600) . ' h ago';
-    return (int)($d / 86400) . ' days ago';
-}
-function nb_serverLabel($key) { global $serverInfo; return $serverInfo[$key][1] ?? $key; }
+function nb_ord($n) { return $n . (in_array($n % 100, [11, 12, 13]) ? 'th' : (['th', 'st', 'nd', 'rd'][$n % 10] ?? 'th')); }
+/** An error text without the long Google API URL rclone puts in it. */
+function nb_errText($t) { return mb_strimwidth(preg_replace('#"?(https?://|d/drive/v3/)\S+#', '...', (string)$t), 0, 300, '...'); }
 
-// Last nightly run: the most recent "=== backup start" at 01:3x, and what it logged.
-$logs = glob("$jobDir/logs/backup-*.log") ?: [];
-rsort($logs);
-$nightly = null;
-foreach ($logs as $log) {
-    $lines = file($log, FILE_IGNORE_NEW_LINES) ?: [];
-    for ($i = count($lines) - 1; $i >= 0; $i--) {
-        if (preg_match('/^(\S+ 01:3\d:\d\d) \[INFO\] === backup start/', $lines[$i], $m)) {
-            $run = ['start' => $m[1], 'end' => null, 'result' => null, 'errors' => [], 'uploads' => 0];
-            for ($j = $i + 1; $j < count($lines); $j++) {
-                if (preg_match('/^(\S+ \S+) \[INFO\] === backup end: (.*)$/', $lines[$j], $e)) {
-                    $run['end'] = $e[1];
-                    $run['result'] = $e[2];
-                    break;
-                }
-                if (preg_match('/\[(ERROR|WARN\w*)\]/', $lines[$j])) $run['errors'][] = $lines[$j];
-                if (strpos($lines[$j], ': uploaded ') !== false) $run['uploads']++;
-            }
-            $nightly = $run;
-            break 2;
-        }
+try {
+    $set = nb_q('SELECT name, value FROM backup_settings')->fetchAll(PDO::FETCH_KEY_PAIR);
+    $servers = nb_q('SELECT * FROM backup_servers ORDER BY kind, id')->fetchAll();
+    $apps = nb_q('SELECT * FROM backup_apps ORDER BY id')->fetchAll();
+    $items = nb_q('SELECT i.*, s.kind AS server_kind, st.last_upload, st.last_mb, st.last_sync
+                   FROM backup_items i LEFT JOIN backup_servers s ON s.id = i.server_id LEFT JOIN backup_item_state st ON st.item_id = i.id
+                   ORDER BY i.kind, i.name')->fetchAll();
+    $excludes = [];
+    foreach (nb_q('SELECT item_id, pattern FROM backup_item_excludes ORDER BY pattern')->fetchAll() as $x) $excludes[$x['item_id']][] = $x['pattern'];
+    $lastNightly = nb_q("SELECT * FROM backup_runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT 1")->fetch();
+    $nightlyErrors = $lastNightly ? nb_q("SELECT * FROM backup_run_items WHERE run_id = ? AND outcome = 'error'", [$lastNightly['id']])->fetchAll() : [];
+    $running = nb_q("SELECT * FROM backup_runs WHERE result = 'running' AND started_at > NOW() - INTERVAL 6 HOUR ORDER BY id DESC LIMIT 1")->fetch();
+    $queued = nb_q('SELECT q.*, a.name AS app_name FROM backup_queue q LEFT JOIN backup_apps a ON a.id = q.app_id ORDER BY q.id LIMIT 1')->fetch();
+    $runs = nb_q('SELECT * FROM backup_runs ORDER BY id DESC LIMIT 15')->fetchAll();
+    $inventory = nb_q('SELECT * FROM backup_inventory ORDER BY server_id, name')->fetchAll();
+    $invErrors = nb_q('SELECT * FROM backup_inventory_errors')->fetchAll();
+    $invUpdated = nb_q('SELECT MAX(updated_at) FROM backup_inventory')->fetchColumn();
+    $exclusions = nb_q('SELECT * FROM backup_exclusions ORDER BY server_id, name')->fetchAll();
+} catch (PDOException $e) {
+    echo '<div class="container py-4"><div class="alert alert-danger">Could not read the tools database: ' . nb_h($e->getMessage()) . '</div></div></div></body></html>';
+    exit;
+}
+
+$days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+$summaryText = ['errors' => 'Only when something fails', 'weekly' => 'Errors, plus a summary on the weekly check day', 'daily' => 'Every night (OK or ERROR)'];
+$kindLabel = ['mysql' => 'MySQL', 'postgres' => 'Postgres', 'qdrant' => 'Qdrant'];
+$serverById = array_column($servers, null, 'id');
+$serverLabel = fn($id) => isset($serverById[$id]) ? $kindLabel[$serverById[$id]['kind']] . (isset($serverById[$id]['port']) ? ' :' . $serverById[$id]['port'] : '') . " ($id)" : $id;
+$shown = function ($name, $v) use ($days, $summaryText) {
+    switch ($name) {
+        case 'schedule_time': return date('g:i A', strtotime($v));
+        case 'weekly_day': return $days[(int)$v] ?? $v;
+        case 'restore_test_day': return nb_ord((int)$v) . ' of each month';
+        case 'email_summary': return $summaryText[$v] ?? $v;
+        default: return $v;
     }
+};
+$itemsByApp = [];
+foreach ($items as $i) $itemsByApp[$i['app_id']][] = $i;
+$serverUse = [];
+foreach ($items as $i) if ($i['server_id']) $serverUse[$i['server_id']] = ($serverUse[$i['server_id']] ?? 0) + 1;
+$covered = [];
+foreach ($items as $i) if ($i['server_id']) $covered[$i['server_id'] . '/' . strtolower($i['name'])] = true;
+$excluded = [];
+foreach ($exclusions as $x) $excluded[$x['server_id'] . '/' . strtolower($x['name'])] = $x;
+$notBackedUp = array_values(array_filter($inventory, fn($x) => !isset($covered[$x['server_id'] . '/' . strtolower($x['name'])]) && !isset($excluded[$x['server_id'] . '/' . strtolower($x['name'])])));
+$nextRun = strtotime(date('Y-m-d') . ' ' . ($set['schedule_time'] ?? '01:30'));
+if ($nextRun <= time()) $nextRun = strtotime('+1 day', $nextRun);
+// For the Add picker: what exists and is not backed up (and not left out on purpose), per kind.
+$pick = ['database' => [], 'collection' => []];
+foreach ($notBackedUp as $x) {
+    $k = ($serverById[$x['server_id']]['kind'] ?? '') === 'qdrant' ? 'collection' : 'database';
+    $pick[$k][$x['server_id'] . '|' . $x['name']] = $x['name'] . ' - ' . $serverLabel($x['server_id']);
 }
-
-// What is backed up (kind/server/name -> app), and what exists but is not.
-$backedUp = [];
-foreach ($apps as $a) {
-    foreach ($a['databases'] ?? [] as $d) $backedUp[($serverInfo[$d['server']][0] ?? 'mysql') . "/{$d['server']}/" . strtolower($d['db'])] = $a['name'];
-    foreach ($a['collections'] ?? [] as $c) $backedUp["qdrant/{$c['server']}/" . strtolower($c['collection'])] = $a['name'];
-}
-$notBackedUp = [];
-$uncovered = [];   // for the Add picker: kind => server => [names]
-foreach (['mysql', 'postgres', 'qdrant'] as $kind) {
-    foreach ($inventory[$kind] ?? [] as $server => $list) {
-        if (isset($list['error'])) { $notBackedUp[] = ['kind' => $kind, 'server' => $server, 'name' => null, 'error' => $list['error']]; continue; }
-        foreach ($list as $x) {
-            if (isset($backedUp["$kind/$server/" . strtolower($x['name'])])) continue;
-            $notBackedUp[] = ['kind' => $kind, 'server' => $server, 'name' => $x['name'], 'mb' => $x['mb'] ?? null, 'points' => $x['points'] ?? null];
-            if (!isset($ownBackup[strtolower($x['name'])]) && !($server === 'mysql84')) $uncovered[$kind][$server][] = $x['name'];
-        }
-    }
-}
-
-$latestLog = $logs[0] ?? null;
-$tail = $latestLog ? array_slice(file($latestLog, FILE_IGNORE_NEW_LINES) ?: [], -40) : [];
 ?>
     <style>
-        .nb-app td { vertical-align: top; }
+        .nb-tbl td { vertical-align: top; }
         .nb-sub { font-size: .85rem; }
         .nb-item { display: flex; align-items: flex-start; gap: .35rem; margin-bottom: .2rem; }
         .nb-x { border: 0; background: none; color: #adb5bd; padding: 0 .2rem; line-height: 1.2; }
-        .nb-x:hover { color: #dc3545; }
-        .nb-log { background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 5px; font-family: 'Courier New', monospace;
-                  font-size: 13px; white-space: pre-wrap; word-wrap: break-word; max-height: 420px; overflow-y: auto; }
-        .nb-log .err { color: #ff8080; }
+        .nb-x:hover { color: #0d6efd; }
+        .nb-x.nb-del:hover { color: #dc3545; }
+        .nb-err { color: #dc3545; font-size: .85rem; overflow-wrap: anywhere; }
         tr.nb-off { opacity: .55; }
     </style>
 
     <div class="container py-4">
-        <h1 class="h3 mb-1"><i class="bi bi-cloud-check"></i> Nightly Backup</h1>
-        <p class="text-muted mb-4">Every night at 1:30 AM the <strong>Backup - Nightly</strong> task copies each app's databases (MySQL and Postgres),
-            Qdrant collections and user files (photos, uploads) to Google Drive. App code is not in the backup: code lives in git.</p>
+        <h1 class="h3 mb-3"><i class="bi bi-cloud-check"></i> Nightly Backup</h1>
         <div id="nbAlert"></div>
 
-        <!-- Last nightly run + run now -->
+        <!-- Status -->
         <div class="card shadow-sm mb-4">
             <div class="card-body">
-                <div class="d-flex flex-wrap gap-2 align-items-start">
-                    <div class="me-auto">
-                        <h5 class="card-title">Last nightly run</h5>
-                        <?php if (!$nightly): ?>
-                            <p class="mb-0 text-danger">No nightly run found in the logs.</p>
-                        <?php else:
-                            $ok = $nightly['result'] === 'OK' && !$nightly['errors']; ?>
-                            <p class="mb-1">
-                                <span class="badge <?= $ok ? 'bg-success' : 'bg-danger' ?> fs-6"><?= $ok ? 'OK' : nb_h($nightly['result'] ?: 'did not finish') ?></span>
-                                &nbsp;<?= nb_when(str_replace(' ', 'T', $nightly['start'])) ?>
-                                <?php if ($nightly['end']): ?><span class="text-muted">, took <?= max(1, (int)round((strtotime($nightly['end']) - strtotime($nightly['start'])) / 60)) ?> min</span><?php endif; ?>
-                            </p>
-                            <p class="mb-0 text-muted"><?= (int)$nightly['uploads'] ?> copies uploaded (anything with no changes since the night before is skipped).</p>
-                            <?php foreach ($nightly['errors'] as $e): ?><div class="text-danger small"><?= nb_h($e) ?></div><?php endforeach; ?>
+                <div class="d-flex flex-wrap gap-4 align-items-start">
+                    <div>
+                        <div class="text-muted small">Last nightly run</div>
+                        <?php if (!$lastNightly): ?>
+                            <span class="text-muted">none yet</span>
+                        <?php else: $ok = $lastNightly['result'] === 'OK'; ?>
+                            <span class="badge <?= $ok ? 'bg-success' : ($lastNightly['result'] === 'running' ? 'bg-primary' : 'bg-danger') ?>"><?= nb_h($lastNightly['result'] ?: 'did not finish') ?></span>
+                            <?= nb_when($lastNightly['started_at']) ?>
+                            <?php if ($lastNightly['ended_at']): ?><span class="text-muted small">took <?= max(1, (int)round((strtotime($lastNightly['ended_at']) - strtotime($lastNightly['started_at'])) / 60)) ?> min</span><?php endif; ?>
                         <?php endif; ?>
                     </div>
-                    <button class="btn btn-primary nb-run" data-app=""><i class="bi bi-play-fill"></i> Run all now</button>
+                    <div>
+                        <div class="text-muted small">Next nightly run</div>
+                        <?= nb_h(date('D M j, g:i A', $nextRun)) ?>
+                    </div>
+                    <div class="ms-auto"><button class="btn btn-primary nb-run" data-app=""><i class="bi bi-play-fill"></i> Run all now</button></div>
                 </div>
-                <div id="nbRunState" class="mt-3 small">
-                    <?php if ($queued): ?>
-                        <span class="badge bg-info text-dark">Queued</span> <?= !empty($queued['inventory_only']) ? 'Refreshing the list of databases' : 'Run of ' . nb_h($queued['app'] ?? 'all apps') ?> - starts within a minute.
-                    <?php elseif ($runStatus && !empty($runStatus['running'])): ?>
-                        <span class="badge bg-primary">Running</span> <?= nb_h($runStatus['app'] ?? 'all apps') ?>, started <?= nb_when($runStatus['started']) ?>.
-                    <?php elseif ($runStatus && !empty($runStatus['finished'])): ?>
-                        Last run: <?= nb_h($runStatus['app'] ?? 'all apps') ?> finished <?= nb_when($runStatus['finished']) ?> -
-                        <span class="<?= ($runStatus['result'] ?? '') === 'OK' ? 'text-success' : 'text-danger' ?>"><?= nb_h($runStatus['result'] ?? '') ?></span>
-                    <?php endif; ?>
-                </div>
+                <?php foreach ($nightlyErrors as $e): ?><div class="nb-err mt-2"><?= nb_h($e['app_name'] . ' / ' . $e['item'] . ': ' . nb_errText($e['detail'])) ?></div><?php endforeach; ?>
+                <?php if ($queued): ?>
+                    <div class="mt-2 small"><span class="badge bg-info text-dark">Queued</span> <?= $queued['inventory_only'] ? 'Refreshing the list of databases' : 'Run of ' . nb_h($queued['app_name'] ?? 'all apps') ?> - starts within a minute.</div>
+                <?php elseif ($running): ?>
+                    <div class="mt-2 small"><span class="badge bg-primary">Running</span> <?= nb_h($running['app_name'] ?? 'all apps') ?>, started <?= nb_when($running['started_at']) ?>.</div>
+                <?php endif; ?>
             </div>
         </div>
 
-        <!-- How it works -->
+        <!-- Settings -->
         <div class="card shadow-sm mb-4">
             <div class="card-body">
-                <h5 class="card-title">How it works</h5>
-                <ul class="mb-0">
-                    <li><strong>MySQL databases:</strong> copied only when they changed since the last copy (checked in milliseconds, nothing copied otherwise).</li>
-                    <li><strong>Postgres databases:</strong> dumped every night; uploaded only when the content differs from the last copy.</li>
-                    <li><strong>Qdrant collections:</strong> a snapshot is uploaded when the number of points changed, and every Sunday.</li>
-                    <li><strong>Folders:</strong> only new or changed files are sent. Deleted or overwritten files are kept for 30 days.</li>
-                    <li><strong>Kept:</strong> the newest 30 copies of each database / collection, plus one copy per month for the last 12 months.</li>
-                    <li><strong>Sundays:</strong> checks the newest copies really are on Google Drive and emails a summary.</li>
-                    <li><strong>1st of each month:</strong> restores every database's newest copy into a scratch database to prove it works, then drops it.</li>
-                    <li><strong>Any error:</strong> emails <?= nb_h($cfg['email']['to'] ?? 'the owner') ?>.</li>
-                    <li><strong>Run now</strong> (here) starts within a minute (task <em>Backup - On Demand</em>).</li>
-                </ul>
+                <h5 class="card-title">Settings</h5>
+                <table class="table table-sm nb-tbl mb-0"><tbody>
+                <?php foreach (nb_settingDefs() as $name => [$label, $type, $help]): $v = $set[$name] ?? ''; ?>
+                    <tr>
+                        <td style="width:28%"><strong><?= nb_h($label) ?></strong></td>
+                        <td><?= nb_h($v === '' ? '(not set)' : $shown($name, $v)) ?><?php if ($help): ?><div class="text-muted nb-sub"><?= nb_h($help) ?></div><?php endif; ?></td>
+                        <td class="text-end"><button class="btn btn-sm btn-outline-secondary nb-edit-setting" data-name="<?= nb_h($name) ?>" data-label="<?= nb_h($label) ?>" data-type="<?= nb_h($type) ?>" data-value="<?= nb_h($v) ?>" title="Change"><i class="bi bi-pencil"></i></button></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody></table>
             </div>
         </div>
 
-        <!-- What is backed up -->
+        <!-- Servers -->
         <div class="card shadow-sm mb-4">
             <div class="card-body">
                 <div class="d-flex align-items-center mb-2">
-                    <h5 class="card-title mb-0 me-auto">What is backed up (<?= count($apps) ?> apps)</h5>
+                    <h5 class="card-title mb-0 me-auto">Servers</h5>
+                    <button class="btn btn-sm btn-success nb-server"><i class="bi bi-plus-lg"></i> Add server</button>
+                </div>
+                <table class="table table-sm nb-tbl mb-0">
+                    <thead class="table-light"><tr><th>Id</th><th>Type</th><th>Where</th><th>Programs folder</th><th>Login (environment variables)</th><th>Used by</th><th></th></tr></thead>
+                    <tbody>
+                    <?php foreach ($servers as $s): ?>
+                        <tr>
+                            <td><strong><?= nb_h($s['id']) ?></strong><?php if ($s['note']): ?><div class="text-muted nb-sub"><?= nb_h($s['note']) ?></div><?php endif; ?></td>
+                            <td><?= nb_h($kindLabel[$s['kind']]) ?></td>
+                            <td><?= nb_h($s['url'] ?? ('127.0.0.1:' . $s['port'])) ?></td>
+                            <td class="nb-sub"><?= nb_h($s['bin']) ?></td>
+                            <td class="nb-sub"><?= nb_h($s['kind'] === 'qdrant' ? $s['key_env'] : $s['user_env'] . ' / ' . $s['pass_env']) ?></td>
+                            <td><?= (int)($serverUse[$s['id']] ?? 0) ?></td>
+                            <td class="text-end text-nowrap">
+                                <button class="btn btn-sm btn-outline-secondary nb-server" data-row="<?= nb_h(json_encode($s)) ?>" title="Change"><i class="bi bi-pencil"></i></button>
+                                <?php if (empty($serverUse[$s['id']])): ?><button class="btn btn-sm btn-outline-danger nb-del" data-action="delete_server" data-args="<?= nb_h(json_encode(['id' => $s['id']])) ?>" title="Delete"><i class="bi bi-trash"></i></button><?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Apps -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <h5 class="card-title mb-0 me-auto">Apps (<?= count($apps) ?>)</h5>
                     <button class="btn btn-sm btn-success" id="nbAddApp"><i class="bi bi-plus-lg"></i> Add app</button>
                 </div>
                 <div class="table-responsive">
-                    <table class="table table-sm nb-app mb-0">
-                        <thead class="table-light">
-                            <tr><th>On</th><th>App</th><th>Databases / collections</th><th>Last copy</th><th>Files (folders)</th><th></th></tr>
-                        </thead>
+                    <table class="table table-sm nb-tbl mb-0">
+                        <thead class="table-light"><tr><th>On</th><th>App</th><th>Databases / collections</th><th>Folders</th><th></th></tr></thead>
                         <tbody>
                         <?php foreach ($apps as $a):
-                            $state = json_decode((string)@file_get_contents("$jobDir/state/{$a['name']}.json"), true) ?: [];
-                            $items = [];
-                            foreach ($a['databases'] ?? [] as $d) $items[] = ['kind' => $serverInfo[$d['server']][0] ?? 'mysql', 'server' => $d['server'], 'name' => $d['db'], 'key' => "db:{$d['server']}/{$d['db']}"];
-                            foreach ($a['collections'] ?? [] as $c) $items[] = ['kind' => 'qdrant', 'server' => $c['server'], 'name' => $c['collection'], 'key' => "qdrant:{$c['server']}/{$c['collection']}"]; ?>
-                            <tr class="<?= empty($a['enabled']) ? 'nb-off' : '' ?>">
-                                <td><div class="form-check form-switch m-0"><input class="form-check-input nb-toggle" type="checkbox" data-app="<?= nb_h($a['name']) ?>" <?= !empty($a['enabled']) ? 'checked' : '' ?> title="Include in the nightly backup"></div></td>
+                            $mine = $itemsByApp[$a['id']] ?? [];
+                            $dbs = array_filter($mine, fn($i) => $i['kind'] !== 'folder');
+                            $folders = array_filter($mine, fn($i) => $i['kind'] === 'folder'); ?>
+                            <tr class="<?= $a['enabled'] ? '' : 'nb-off' ?>">
+                                <td><div class="form-check form-switch m-0"><input class="form-check-input nb-toggle" type="checkbox" data-app="<?= nb_h($a['name']) ?>" <?= $a['enabled'] ? 'checked' : '' ?> title="Include in the nightly backup"></div></td>
                                 <td>
                                     <strong><?= nb_h($a['name']) ?></strong>
-                                    <?php if (empty($a['enabled'])): ?><span class="badge bg-warning text-dark">turned off</span><?php endif; ?>
-                                    <?php if (!empty($a['what'])): ?><div class="text-muted nb-sub"><?= nb_h($a['what']) ?></div><?php endif; ?>
+                                    <?php if ($a['what']): ?><div class="text-muted nb-sub"><?= nb_h($a['what']) ?></div><?php endif; ?>
+                                    <?php if ($a['keep_versions'] !== null): ?><div class="text-muted nb-sub">keeps <?= (int)$a['keep_versions'] ?> copies + <?= (int)$a['keep_monthly'] ?> monthly</div><?php endif; ?>
                                 </td>
                                 <td>
-                                    <?php foreach ($items as $it): ?>
-                                        <div class="nb-item"><span><?= nb_h($it['name']) ?> <span class="text-muted nb-sub">on <?= nb_h(nb_serverLabel($it['server'])) ?></span></span>
-                                            <button class="nb-x nb-remove" title="Remove from the backup (copies already on Drive are kept)" data-app="<?= nb_h($a['name']) ?>" data-kind="<?= nb_h($it['kind']) ?>" data-server="<?= nb_h($it['server']) ?>" data-name="<?= nb_h($it['name']) ?>"><i class="bi bi-x-circle"></i></button></div>
-                                    <?php endforeach; ?>
-                                    <?php if (!$items): ?><span class="text-muted">none</span><?php endif; ?>
-                                </td>
-                                <td>
-                                    <?php foreach ($items as $it):
-                                        $s = $state[$it['key']] ?? null; ?>
-                                        <div class="nb-item"><span><?= nb_when($s['last_upload'] ?? null) ?>
-                                            <?php if ($s && isset($s['last_mb'])): ?><span class="text-muted nb-sub">, <?= nb_h($s['last_mb']) ?> MB</span><?php endif; ?></span>
+                                    <?php foreach ($dbs as $i): ?>
+                                        <div class="nb-item"><div><?= nb_h($i['name']) ?> <span class="text-muted nb-sub">on <?= nb_h($serverLabel($i['server_id'])) ?></span>
+                                            <div class="text-muted nb-sub">last copy <?= nb_when($i['last_upload']) ?><?= $i['last_mb'] !== null ? ', ' . nb_h($i['last_mb']) . ' MB' : '' ?></div></div>
+                                            <button class="nb-x nb-del" data-action="delete_item" data-args="<?= nb_h(json_encode(['id' => (int)$i['id']])) ?>" title="Remove from the backup (copies already on Drive are kept)"><i class="bi bi-x-circle"></i></button>
                                         </div>
                                     <?php endforeach; ?>
+                                    <?php if (!$dbs): ?><span class="text-muted">none</span><?php endif; ?>
                                 </td>
                                 <td>
-                                    <?php foreach ($a['folders'] ?? [] as $f):
-                                        $s = $state["folder:{$a['name']}/{$f['name']}"] ?? null; ?>
-                                        <div class="nb-item"><div><?= nb_h($f['what'] ?? $f['name']) ?>
-                                            <div class="text-muted nb-sub"><?= nb_h($f['path']) ?>, last sync <?= nb_when($s['last_sync'] ?? null) ?>
-                                                <?php if (!empty($f['exclude'])): ?><br>skips <?= nb_h(implode(', ', $f['exclude'])) ?><?php endif; ?></div></div>
-                                            <button class="nb-x nb-remove" title="Remove from the backup (copies already on Drive are kept)" data-app="<?= nb_h($a['name']) ?>" data-kind="folder" data-name="<?= nb_h($f['name']) ?>"><i class="bi bi-x-circle"></i></button>
+                                    <?php foreach ($folders as $i): $ex = $excludes[$i['id']] ?? []; ?>
+                                        <div class="nb-item"><div><?= nb_h($i['name']) ?><?= $i['what'] ? ' <span class="text-muted nb-sub">- ' . nb_h($i['what']) . '</span>' : '' ?>
+                                            <div class="text-muted nb-sub"><?= nb_h($i['path']) ?>, last sync <?= nb_when($i['last_sync']) ?><?php if ($ex): ?><br>skips <?= nb_h(implode(', ', $ex)) ?><?php endif; ?></div></div>
+                                            <button class="nb-x nb-edit-folder" title="Change" data-row="<?= nb_h(json_encode(['id' => (int)$i['id'], 'name' => $i['name'], 'app' => $a['name'], 'path' => $i['path'], 'what' => $i['what'], 'exclude' => implode(', ', $ex)])) ?>"><i class="bi bi-pencil"></i></button>
+                                            <button class="nb-x nb-del" data-action="delete_item" data-args="<?= nb_h(json_encode(['id' => (int)$i['id']])) ?>" title="Remove from the backup (copies already on Drive are kept)"><i class="bi bi-x-circle"></i></button>
                                         </div>
                                     <?php endforeach; ?>
-                                    <?php if (empty($a['folders'])): ?><span class="text-muted">none</span><?php endif; ?>
+                                    <?php if (!$folders): ?><span class="text-muted">none</span><?php endif; ?>
                                 </td>
                                 <td class="text-end text-nowrap">
+                                    <button class="btn btn-sm btn-outline-secondary nb-edit-app" data-row="<?= nb_h(json_encode(['app' => $a['name'], 'what' => $a['what'], 'kv' => $a['keep_versions'], 'km' => $a['keep_monthly']])) ?>" title="Change"><i class="bi bi-pencil"></i></button>
                                     <button class="btn btn-sm btn-outline-success nb-add" data-app="<?= nb_h($a['name']) ?>" title="Add a database, collection or folder"><i class="bi bi-plus-lg"></i></button>
-                                    <button class="btn btn-sm btn-outline-primary nb-run" data-app="<?= nb_h($a['name']) ?>" title="Back up this app now"><i class="bi bi-play-fill"></i> Run</button>
-                                    <?php if (!$items && empty($a['folders'])): ?>
-                                        <button class="btn btn-sm btn-outline-danger nb-remove-app" data-app="<?= nb_h($a['name']) ?>" title="Remove this empty app"><i class="bi bi-trash"></i></button>
-                                    <?php endif; ?>
+                                    <button class="btn btn-sm btn-outline-primary nb-run" data-app="<?= nb_h($a['name']) ?>" title="Back up this app now"><i class="bi bi-play-fill"></i></button>
+                                    <?php if (!$mine): ?><button class="btn btn-sm btn-outline-danger nb-del" data-action="delete_app" data-args="<?= nb_h(json_encode(['app' => $a['name']])) ?>" title="Delete this empty app"><i class="bi bi-trash"></i></button><?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -221,117 +219,106 @@ $tail = $latestLog ? array_slice(file($latestLog, FILE_IGNORE_NEW_LINES) ?: [], 
             </div>
         </div>
 
-        <!-- What is NOT backed up -->
+        <!-- Not backed up + left out on purpose -->
         <div class="card shadow-sm mb-4 border-warning">
             <div class="card-body">
                 <div class="d-flex align-items-center mb-2">
                     <h5 class="card-title mb-0 me-auto">Not in this backup</h5>
-                    <span class="text-muted small me-2">List from <?= nb_when($inventory['updated'] ?? null) ?></span>
+                    <span class="text-muted small me-2">List from <?= nb_when($invUpdated) ?></span>
                     <button class="btn btn-sm btn-outline-secondary" id="nbRefresh"><i class="bi bi-arrow-clockwise"></i> Refresh list</button>
                 </div>
-                <?php if (!$inventory): ?>
-                    <p class="mb-0 text-muted">No list yet: press Refresh list.</p>
-                <?php elseif (!$notBackedUp): ?>
-                    <p class="mb-0 text-success">Every database and Qdrant collection on this machine is in the backup.</p>
+                <?php foreach ($invErrors as $e): ?><div class="nb-err"><?= nb_h($serverLabel($e['server_id'])) ?>: could not read the list (<?= nb_h($e['error']) ?>)</div><?php endforeach; ?>
+                <?php if (!$notBackedUp): ?>
+                    <p class="text-success">Everything on this machine is backed up or left out on purpose.</p>
                 <?php else: ?>
-                    <table class="table table-sm mb-0">
-                        <thead class="table-light"><tr><th>Database / collection</th><th>Server</th><th>Size</th><th>Why</th><th></th></tr></thead>
+                    <table class="table table-sm nb-tbl">
+                        <thead class="table-light"><tr><th>Database / collection</th><th>Server</th><th>Size</th><th></th></tr></thead>
                         <tbody>
-                        <?php foreach ($notBackedUp as $n): ?>
+                        <?php foreach ($notBackedUp as $n): $k = ($serverById[$n['server_id']]['kind'] ?? '') === 'qdrant' ? 'collection' : 'database'; ?>
                             <tr>
-                                <?php if ($n['name'] === null): ?>
-                                    <td colspan="5" class="text-danger"><?= nb_h(nb_serverLabel($n['server'])) ?>: could not read the list (<?= nb_h($n['error']) ?>)</td>
-                                <?php else:
-                                    $lname = strtolower($n['name']);
-                                    $canAdd = true; ?>
-                                    <td><?= nb_h($n['name']) ?></td>
-                                    <td><?= nb_h(nb_serverLabel($n['server'])) ?></td>
-                                    <td><?= $n['points'] !== null ? number_format($n['points']) . ' points' : nb_h($n['mb']) . ' MB' ?></td>
-                                    <td><?php
-                                        if (isset($ownBackup[$lname])) {
-                                            echo nb_h($ownBackup[$lname]); $canAdd = false;
-                                        } elseif ($n['server'] === 'mysql84') {
-                                            echo 'Old copy left on MySQL 8.4' . (isset($backedUp["mysql/mysql95/$lname"]) ? '. The live one is on MySQL 9.5 and is backed up (' . nb_h($backedUp["mysql/mysql95/$lname"]) . ').' : '.');
-                                            $canAdd = false;
-                                        } else {
-                                            echo '<span class="text-danger">Not backed up.</span>';
-                                        }
-                                    ?></td>
-                                    <td class="text-end"><?php if ($canAdd): ?>
-                                        <button class="btn btn-sm btn-outline-success nb-add" data-kind="<?= nb_h($n['kind']) ?>" data-server="<?= nb_h($n['server']) ?>" data-name="<?= nb_h($n['name']) ?>"><i class="bi bi-plus-lg"></i> Add to backup</button>
-                                    <?php endif; ?></td>
-                                <?php endif; ?>
+                                <td><?= nb_h($n['name']) ?></td>
+                                <td><?= nb_h($serverLabel($n['server_id'])) ?></td>
+                                <td><?= $n['points'] !== null ? number_format($n['points']) . ' points' : nb_h($n['mb']) . ' MB' ?></td>
+                                <td class="text-end text-nowrap">
+                                    <button class="btn btn-sm btn-outline-success nb-add" data-kind="<?= $k ?>" data-pick="<?= nb_h($n['server_id'] . '|' . $n['name']) ?>"><i class="bi bi-plus-lg"></i> Add to backup</button>
+                                    <button class="btn btn-sm btn-outline-secondary nb-exclude" data-server="<?= nb_h($n['server_id']) ?>" data-name="<?= nb_h($n['name']) ?>" data-reason="">Leave out</button>
+                                </td>
                             </tr>
                         <?php endforeach; ?>
                         </tbody>
                     </table>
                 <?php endif; ?>
+                <?php if ($exclusions): ?>
+                    <div class="fw-semibold mt-3 mb-1">Left out on purpose</div>
+                    <table class="table table-sm nb-tbl mb-0"><tbody>
+                    <?php foreach ($exclusions as $x): ?>
+                        <tr>
+                            <td style="width:22%"><?= nb_h($x['name']) ?></td>
+                            <td style="width:22%" class="nb-sub"><?= nb_h($serverLabel($x['server_id'])) ?></td>
+                            <td class="nb-sub"><?= nb_h($x['reason']) ?></td>
+                            <td class="text-end text-nowrap">
+                                <button class="btn btn-sm btn-outline-secondary nb-exclude" data-server="<?= nb_h($x['server_id']) ?>" data-name="<?= nb_h($x['name']) ?>" data-reason="<?= nb_h($x['reason']) ?>" title="Change"><i class="bi bi-pencil"></i></button>
+                                <button class="btn btn-sm btn-outline-danger nb-del" data-action="delete_exclusion" data-args="<?= nb_h(json_encode(['server' => $x['server_id'], 'name' => $x['name']])) ?>" title="Delete (it shows as not backed up again)"><i class="bi bi-trash"></i></button>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody></table>
+                <?php endif; ?>
             </div>
         </div>
 
-        <!-- Where + restore -->
+        <!-- Run history -->
         <div class="card shadow-sm mb-4">
             <div class="card-body">
-                <h5 class="card-title">Where the copies are, and how to restore</h5>
-                <p class="mb-2">Google Drive, folder <code>dbBackup</code> (rclone remote <code><?= nb_h($cfg['rclone']['remote'] ?? 'dbBackup:dbBackup') ?></code>):</p>
-<pre class="bg-light p-2 rounded small mb-3">dbBackup/&lt;App&gt;/database/&lt;db&gt;/&lt;db&gt;-YYYY-MM-DD_HHMMSS.sql.gz              one file per copy (MySQL and Postgres)
-dbBackup/&lt;App&gt;/qdrant/&lt;collection&gt;/&lt;collection&gt;-YYYY-MM-DD_HHMMSS.snapshot.gz  Qdrant snapshot (gzipped)
-dbBackup/&lt;App&gt;/files/&lt;folder&gt;/...                                   mirror of the folder
-dbBackup/&lt;App&gt;/files-replaced/&lt;folder&gt;/&lt;date&gt;/...                   deleted/overwritten files, kept 30 days</pre>
-                <p class="mb-1"><strong>Restore a MySQL database:</strong> download the <code>.sql.gz</code>, unzip it, create an empty
-                    database, then load it: <code>mysql -h 127.0.0.1 -P 3307 -u sysdba &lt;database&gt; &lt; file.sql</code></p>
-                <p class="mb-1"><strong>Restore a Postgres database:</strong> unzip it, <code>createdb &lt;database&gt;</code>, then
-                    <code>psql -h 127.0.0.1 -U postgres -d &lt;database&gt; -f file.sql</code></p>
-                <p class="mb-1"><strong>Restore a Qdrant collection:</strong> unzip the <code>.snapshot.gz</code>, then upload the <code>.snapshot</code> file:
-                    <code>POST http://127.0.0.1:6333/collections/&lt;collection&gt;/snapshots/upload</code> (with the api-key header).</p>
-                <p class="mb-0"><strong>Restore files:</strong> copy them back from <code>dbBackup/&lt;App&gt;/files/&lt;folder&gt;</code>.
-                    Full instructions: <code>D:\AdvancedVentures\BackupJob\README.md</code>.</p>
+                <h5 class="card-title">Recent runs</h5>
+                <?php if (!$runs): ?><p class="text-muted mb-0">No runs recorded yet.</p><?php else: ?>
+                <table class="table table-sm nb-tbl mb-0">
+                    <thead class="table-light"><tr><th>Started</th><th>Kind</th><th>Apps</th><th>Result</th><th>Took</th><th></th></tr></thead>
+                    <tbody>
+                    <?php foreach ($runs as $r): ?>
+                        <tr>
+                            <td><?= nb_when($r['started_at']) ?></td>
+                            <td><?= nb_h(['nightly' => 'Nightly', 'manual' => 'By hand', 'dbtools' => 'Run now'][$r['kind']]) ?><?= $r['restore_test'] ? ' <span class="badge bg-light text-dark">restore test</span>' : '' ?><?= $r['verify'] ? ' <span class="badge bg-light text-dark">check</span>' : '' ?></td>
+                            <td><?= nb_h($r['app_name'] ?? 'all') ?></td>
+                            <td class="<?= $r['result'] === 'OK' ? 'text-success' : ($r['result'] === 'running' ? 'text-primary' : 'text-danger') ?>"><?= nb_h($r['result']) ?></td>
+                            <td><?= $r['ended_at'] ? max(1, (int)round((strtotime($r['ended_at']) - strtotime($r['started_at'])) / 60)) . ' min' : '' ?></td>
+                            <td class="text-end"><button class="btn btn-sm btn-outline-secondary nb-run-items" data-run="<?= (int)$r['id'] ?>" title="What happened to each item"><i class="bi bi-list-ul"></i></button></td>
+                        </tr>
+                        <tr class="d-none" id="nbRun<?= (int)$r['id'] ?>"><td colspan="6"><div class="nb-sub">
+                            <?php foreach (nb_q("SELECT * FROM backup_run_items WHERE run_id = ? ORDER BY FIELD(outcome, 'error', 'copied', 'synced', 'restore_ok', 'unchanged', 'dry_run'), app_name, item", [$r['id']])->fetchAll() as $ri): ?>
+                                <div class="<?= $ri['outcome'] === 'error' ? 'nb-err' : ($ri['outcome'] === 'unchanged' ? 'text-muted' : '') ?>"><?= nb_h($ri['app_name'] . ' / ' . $ri['item'] . ': ' . nb_errText($ri['detail'])) ?></div>
+                            <?php endforeach; ?>
+                        </div></td></tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                <?php endif; ?>
             </div>
         </div>
 
-        <!-- Latest log -->
-        <div class="card shadow-sm mb-4">
-            <div class="card-body">
-                <h5 class="card-title">Latest log <?php if ($latestLog): ?><span class="text-muted small">(<?= nb_h(basename($latestLog)) ?>, last 40 lines)</span><?php endif; ?></h5>
-                <div class="nb-log"><?php foreach ($tail as $l): ?><div class="<?= preg_match('/\[(ERROR|WARN\w*)\]/', $l) ? 'err' : '' ?>"><?= nb_h($l) ?></div><?php endforeach; ?></div>
+        <!-- Restore help -->
+        <details class="card shadow-sm mb-4">
+            <summary class="card-body py-2"><strong>How to restore</strong></summary>
+            <div class="card-body pt-0">
+                <p class="mb-2">Copies are on Google Drive under <code><?= nb_h($set['rclone_remote'] ?? '') ?></code>:
+                    <code>&lt;App&gt;/database/&lt;db&gt;/*.sql.gz</code>, <code>&lt;App&gt;/qdrant/&lt;collection&gt;/*.snapshot.gz</code>,
+                    <code>&lt;App&gt;/files/&lt;folder&gt;/</code>, <code>&lt;App&gt;/files-replaced/&lt;folder&gt;/&lt;date&gt;/</code>.</p>
+                <p class="mb-1"><strong>MySQL:</strong> unzip, create an empty database, <code>mysql -h 127.0.0.1 -P 3307 -u sysdba &lt;db&gt; &lt; file.sql</code></p>
+                <p class="mb-1"><strong>Postgres:</strong> unzip, <code>createdb &lt;db&gt;</code>, <code>psql -h 127.0.0.1 -U postgres -d &lt;db&gt; -f file.sql</code></p>
+                <p class="mb-1"><strong>Qdrant:</strong> unzip, then POST the <code>.snapshot</code> to <code>http://127.0.0.1:6333/collections/&lt;collection&gt;/snapshots/upload</code> (api-key header).</p>
+                <p class="mb-0"><strong>Files:</strong> copy back from <code>&lt;App&gt;/files/&lt;folder&gt;</code>. More: <code>D:\AdvancedVentures\BackupJob\README.md</code>.</p>
             </div>
-        </div>
+        </details>
     </div>
 
-    <!-- Add a database / collection / folder -->
-    <div class="modal fade" id="nbAddModal" tabindex="-1">
+    <!-- One modal for every edit -->
+    <div class="modal fade" id="nbModal" tabindex="-1">
         <div class="modal-dialog"><div class="modal-content">
-            <div class="modal-header"><h5 class="modal-title">Add to the backup</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label class="form-label">App</label>
-                    <select class="form-select" id="nbAddApp2"></select>
-                    <input class="form-control mt-2 d-none" id="nbNewAppName" placeholder="New app name">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">What</label>
-                    <select class="form-select" id="nbAddKind">
-                        <option value="mysql">MySQL database</option>
-                        <option value="postgres">Postgres database</option>
-                        <option value="qdrant">Qdrant collection</option>
-                        <option value="folder">Folder of files</option>
-                    </select>
-                </div>
-                <div id="nbAddDb" class="mb-3">
-                    <label class="form-label">Name</label>
-                    <select class="form-select" id="nbAddName"></select>
-                    <div class="form-text">Only what is on this server and not backed up yet. Missing something new? Refresh list first.</div>
-                </div>
-                <div id="nbAddFolder" class="d-none">
-                    <div class="mb-2"><label class="form-label">Folder on this server</label><input class="form-control" id="nbFolderPath" placeholder="D:\AdvancedVentures\htdocs\app\images"></div>
-                    <div class="mb-2"><label class="form-label">Short name (folder name on Drive)</label><input class="form-control" id="nbFolderName" placeholder="images"></div>
-                    <div class="mb-2"><label class="form-label">What it holds</label><input class="form-control" id="nbFolderWhat" placeholder="photos users upload"></div>
-                </div>
-                <div id="nbAddErr" class="text-danger"></div>
-            </div>
+            <div class="modal-header"><h5 class="modal-title" id="nbModalTitle"></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body"><div id="nbModalBody"></div><div id="nbModalErr" class="text-danger mt-2"></div></div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" data-bs-dismiss="modal" type="button">Cancel</button>
-                <button class="btn btn-primary" id="nbAddSave" type="button">Add</button>
+                <button class="btn btn-primary" id="nbModalSave" type="button">Save</button>
             </div>
         </div></div>
     </div>
@@ -340,12 +327,15 @@ dbBackup/&lt;App&gt;/files-replaced/&lt;folder&gt;/&lt;date&gt;/...             
     const NB = {
         csrf: <?= json_encode($csrf) ?>,
         apps: <?= json_encode(array_column($apps, 'name')) ?>,
-        uncovered: <?= json_encode($uncovered ?: new stdClass()) ?>,
-        servers: <?= json_encode(array_map(fn($x) => $x[1], $serverInfo)) ?>,
-        waiting: <?= json_encode((bool)($queued || ($runStatus['running'] ?? false))) ?>
+        pick: <?= json_encode(['database' => $pick['database'] ?: new stdClass(), 'collection' => $pick['collection'] ?: new stdClass()]) ?>,
+        days: <?= json_encode($days) ?>,
+        summary: <?= json_encode($summaryText) ?>,
+        waiting: <?= json_encode((bool)($queued || $running)) ?>
     };
-    const nbModal = new bootstrap.Modal('#nbAddModal');
-    const nbEsc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const nbModal = new bootstrap.Modal('#nbModal');
+    const nbEsc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const v = id => $('#' + id).val();
+    let nbSave = null;
 
     async function nbPost(action, body) {
         const r = await fetch('ajax-nightly-backup.php', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(Object.assign({action, csrf: NB.csrf}, body || {}))});
@@ -353,70 +343,117 @@ dbBackup/&lt;App&gt;/files-replaced/&lt;folder&gt;/&lt;date&gt;/...             
         if (!j.ok) throw new Error(j.error || 'Failed');
         return j;
     }
-    function nbFlash(msg, type) {
-        $('#nbAlert').html(`<div class="alert alert-${type || 'danger'} alert-dismissible">${nbEsc(msg)}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`);
+    function nbFlash(msg) {
+        $('#nbAlert').html(`<div class="alert alert-danger alert-dismissible">${nbEsc(msg)}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`);
         window.scrollTo(0, 0);
     }
-
-    function nbFillNames() {
-        const kind = $('#nbAddKind').val(), pick = $('#nbAddName').data('pick');
-        $('#nbAddDb').toggleClass('d-none', kind === 'folder');
-        $('#nbAddFolder').toggleClass('d-none', kind !== 'folder');
-        const opts = [];
-        for (const [server, names] of Object.entries(NB.uncovered[kind] || {}))
-            for (const n of names) opts.push(`<option value="${nbEsc(server + '|' + n)}" ${pick === server + '|' + n ? 'selected' : ''}>${nbEsc(n)} - ${nbEsc(NB.servers[server] || server)}</option>`);
-        $('#nbAddName').html(opts.join('') || '<option value="">(nothing left to add)</option>');
+    const nbField = (id, label, value, attrs) => `<div class="mb-2"><label class="form-label">${label}</label><input class="form-control" id="${id}" value="${nbEsc(value)}" ${attrs || ''}></div>`;
+    const nbSelect = (id, label, opts, value) => `<div class="mb-2"><label class="form-label">${label}</label><select class="form-select" id="${id}">` +
+        Object.entries(opts).map(([k, t]) => `<option value="${nbEsc(k)}" ${String(k) === String(value) ? 'selected' : ''}>${nbEsc(t)}</option>`).join('') + '</select></div>';
+    function nbOpen(title, html, save) {
+        $('#nbModalTitle').text(title); $('#nbModalBody').off().html(html); $('#nbModalErr').text('');
+        nbSave = save; nbModal.show();
     }
-    function nbOpenAdd(app, kind, server, name) {
-        $('#nbAddApp2').html(NB.apps.map(a => `<option ${a === app ? 'selected' : ''}>${nbEsc(a)}</option>`).join('') + '<option value="__new">New app...</option>');
-        if (!app && name) $('#nbAddApp2').val('__new');
-        $('#nbNewAppName').val(!app && name ? name : '').toggleClass('d-none', $('#nbAddApp2').val() !== '__new');
-        $('#nbAddKind').val(kind || 'mysql');
-        $('#nbAddName').data('pick', server && name ? server + '|' + name : '');
-        $('#nbFolderPath, #nbFolderName, #nbFolderWhat').val('');
-        $('#nbAddErr').text('');
-        nbFillNames();
-        nbModal.show();
-    }
+    $('#nbModalSave').on('click', async () => {
+        $('#nbModalErr').text('');
+        try { await nbSave(); location.reload(); } catch (x) { $('#nbModalErr').text(x.message); }
+    });
 
-    $(document)
-        .on('click', '.nb-add', e => { const b = $(e.currentTarget); nbOpenAdd(b.data('app') || '', b.data('kind'), b.data('server'), b.data('name')); })
-        .on('change', '#nbAddKind', nbFillNames)
-        .on('change', '#nbAddApp2', () => $('#nbNewAppName').toggleClass('d-none', $('#nbAddApp2').val() !== '__new'))
-        .on('click', '#nbAddApp', () => { nbOpenAdd('', 'mysql'); $('#nbAddApp2').val('__new'); $('#nbNewAppName').removeClass('d-none').focus(); })
-        .on('click', '#nbAddSave', async () => {
-            $('#nbAddErr').text('');
-            try {
-                let app = $('#nbAddApp2').val();
-                if (app === '__new') { app = $('#nbNewAppName').val().trim(); await nbPost('add_app', {name: app}); }
-                const kind = $('#nbAddKind').val();
-                if (kind === 'folder') await nbPost('add_item', {app, kind, path: $('#nbFolderPath').val(), name: $('#nbFolderName').val(), what: $('#nbFolderWhat').val()});
-                else {
-                    const [server, name] = ($('#nbAddName').val() || '|').split('|');
-                    if (!name) throw new Error('Pick one');
-                    await nbPost('add_item', {app, kind, server, name});
-                }
-                location.reload();
-            } catch (x) { $('#nbAddErr').text(x.message); }
-        })
-        .on('click', '.nb-remove', e => {
-            const b = $(e.currentTarget);
-            if (!b.data('armed')) { b.data('armed', 1).html('<span class="small text-danger">remove?</span>'); return; }
-            nbPost('remove_item', {app: b.data('app'), kind: b.data('kind'), server: b.data('server') || '', name: String(b.data('name'))}).then(() => location.reload()).catch(x => nbFlash(x.message));
-        })
-        .on('click', '.nb-remove-app', e => nbPost('remove_app', {app: $(e.currentTarget).data('app')}).then(() => location.reload()).catch(x => nbFlash(x.message)))
-        .on('change', '.nb-toggle', e => nbPost('toggle_app', {app: $(e.target).data('app'), enabled: e.target.checked}).then(() => location.reload()).catch(x => nbFlash(x.message)))
-        .on('click', '.nb-run', e => {
-            const app = $(e.currentTarget).data('app') || null;
-            nbPost('run', {app}).then(() => location.reload()).catch(x => nbFlash(x.message));
-        })
-        .on('click', '#nbRefresh', () => nbPost('refresh_inventory').then(() => location.reload()).catch(x => nbFlash(x.message)));
+    // Settings
+    $(document).on('click', '.nb-edit-setting', e => {
+        const b = $(e.currentTarget), type = String(b.data('type')), val = b.attr('data-value');
+        let html;
+        if (type === 'time') html = nbField('nbV', b.data('label'), val, 'type="time"');
+        else if (type === 'weekday') html = nbSelect('nbV', b.data('label'), Object.assign({}, NB.days), val);
+        else if (type === 'summary') html = nbSelect('nbV', b.data('label'), NB.summary, val);
+        else if (type.startsWith('number')) { const [, mn, mx] = type.split(':'); html = nbField('nbV', b.data('label'), val, `type="number" min="${mn}" max="${mx}"`); }
+        else html = nbField('nbV', b.data('label'), val, type === 'email' ? 'type="email"' : '');
+        nbOpen(b.data('label'), html, () => nbPost('save_setting', {name: b.data('name'), value: v('nbV')}));
+    });
 
-    // While a run is queued or running, check every 10 s and reload when it is done.
+    // Servers
+    $(document).on('click', '.nb-server', e => {
+        const row = $(e.currentTarget).data('row') || null;
+        let kind = row ? row.kind : 'mysql';
+        const body = () => (row ? '' : nbSelect('nbKind', 'Type', {mysql: 'MySQL', postgres: 'Postgres', qdrant: 'Qdrant'}, kind) + nbField('nbId', 'Id (e.g. mysql95)', ''))
+            + (kind === 'qdrant'
+                ? nbField('nbUrl', 'URL', row ? row.url : 'http://127.0.0.1:6333') + nbField('nbKeyEnv', 'API key environment variable', row ? row.key_env : '')
+                : nbField('nbPort', 'Port', row ? row.port : '', 'type="number"') + nbField('nbBin', 'Programs folder (has ' + (kind === 'mysql' ? 'mysqldump.exe' : 'pg_dump.exe') + ')', row ? row.bin : '')
+                  + nbField('nbUserEnv', 'User name environment variable', row ? row.user_env : '') + nbField('nbPassEnv', 'Password environment variable', row ? row.pass_env : ''))
+            + nbField('nbNote', 'Note', row ? row.note : '');
+        nbOpen(row ? 'Server ' + row.id : 'Add server', body(), () => nbPost('save_server', {existing: !!row, kind, id: row ? row.id : v('nbId'),
+            fields: {url: v('nbUrl'), key_env: v('nbKeyEnv'), port: v('nbPort'), bin: v('nbBin'), user_env: v('nbUserEnv'), pass_env: v('nbPassEnv'), note: v('nbNote')}}));
+        $('#nbModalBody').on('change', '#nbKind', () => { const id = v('nbId'); kind = v('nbKind'); $('#nbModalBody').html(body()); $('#nbKind').val(kind); $('#nbId').val(id); });
+    });
+
+    // Apps
+    $('#nbAddApp').on('click', () => nbOpen('Add app', nbField('nbName', 'Name (it becomes the folder on Google Drive)', '') + nbField('nbWhat', 'Description', ''),
+        () => nbPost('add_app', {name: v('nbName'), what: v('nbWhat')})));
+    $(document).on('click', '.nb-edit-app', e => {
+        const r = $(e.currentTarget).data('row');
+        nbOpen('App ' + r.app, nbField('nbWhat', 'Description', r.what) +
+            '<div class="form-text mb-2">Own retention (leave both empty to use the Settings):</div>' +
+            nbField('nbKv', 'Copies kept', r.kv, 'type="number" min="1"') + nbField('nbKm', 'Monthly copies kept', r.km, 'type="number" min="0"') +
+            '<div class="form-text">The app name is its folder on Google Drive, so it is not renamed here.</div>',
+            () => nbPost('update_app', {app: r.app, what: v('nbWhat'), keep_versions: v('nbKv'), keep_monthly: v('nbKm')}));
+    });
+    $(document).on('change', '.nb-toggle', e => nbPost('toggle_app', {app: $(e.target).data('app'), enabled: e.target.checked}).then(() => location.reload()).catch(x => nbFlash(x.message)));
+
+    // Folders
+    $(document).on('click', '.nb-edit-folder', e => {
+        const r = $(e.currentTarget).data('row');
+        nbOpen('Folder ' + r.name + ' (' + r.app + ')',
+            nbField('nbPath', 'Folder on this server', r.path) + nbField('nbWhat', 'What it holds', r.what) +
+            nbField('nbExcl', 'Skip files matching (comma separated, e.g. *.lock, *.log)', r.exclude),
+            () => nbPost('update_folder', {id: r.id, path: v('nbPath'), what: v('nbWhat'), exclude: v('nbExcl')}));
+    });
+
+    // Add a database / collection / folder
+    $(document).on('click', '.nb-add', e => {
+        const b = $(e.currentTarget), pick = b.data('pick') || '';
+        let kind = b.data('kind') || 'database';
+        const appOpts = Object.fromEntries(NB.apps.map(a => [a, a])); appOpts.__new = 'New app...';
+        const startApp = b.data('app') || (pick ? '__new' : NB.apps[0]);
+        const body = () => nbSelect('nbApp', 'App', appOpts, startApp) +
+            `<div id="nbNewAppWrap" class="${startApp === '__new' ? '' : 'd-none'}">${nbField('nbNewApp', 'New app name', pick ? pick.split('|')[1] : '')}</div>` +
+            nbSelect('nbKind', 'What', {database: 'Database (MySQL or Postgres)', collection: 'Qdrant collection', folder: 'Folder of files'}, kind) +
+            (kind === 'folder'
+                ? nbField('nbPath', 'Folder on this server', '') + nbField('nbFname', 'Short name (folder name on Drive)', '') + nbField('nbWhat', 'What it holds', '') + nbField('nbExcl', 'Skip files matching (optional, comma separated)', '')
+                : (Object.keys(NB.pick[kind]).length ? nbSelect('nbPick', 'Name', NB.pick[kind], pick) : '<p class="text-muted">Nothing of this kind is left to add. New? Press Refresh list first.</p>'));
+        nbOpen('Add to the backup', body(), async () => {
+            let app = v('nbApp');
+            if (app === '__new') { app = v('nbNewApp').trim(); await nbPost('add_app', {name: app}); }
+            if (kind === 'folder') return nbPost('add_item', {app, kind, path: v('nbPath'), name: v('nbFname'), what: v('nbWhat'), exclude: v('nbExcl')});
+            const [server, name] = (v('nbPick') || '|').split('|');
+            if (!name) throw new Error('Nothing to add');
+            return nbPost('add_item', {app, kind, server, name});
+        });
+        $('#nbModalBody').on('change', '#nbKind', () => { const app = v('nbApp'); kind = v('nbKind'); $('#nbModalBody').html(body()); $('#nbKind').val(kind); $('#nbApp').val(app).trigger('change'); })
+            .on('change', '#nbApp', () => $('#nbNewAppWrap').toggleClass('d-none', v('nbApp') !== '__new'));
+    });
+
+    // Leave out on purpose (add or change the reason)
+    $(document).on('click', '.nb-exclude', e => {
+        const b = $(e.currentTarget);
+        nbOpen('Leave out ' + b.data('name'), nbField('nbReason', 'Why it is left out', b.attr('data-reason')),
+            () => nbPost('save_exclusion', {server: b.data('server'), name: String(b.data('name')), reason: v('nbReason')}));
+    });
+
+    // Delete buttons: first click arms, second click deletes.
+    $(document).on('click', '.nb-del', e => {
+        const b = $(e.currentTarget);
+        if (!b.data('armed')) { b.data('armed', 1).addClass('text-danger').attr('title', 'Click again to delete'); b.find('i').attr('class', 'bi bi-question-circle'); return; }
+        nbPost(b.data('action'), b.data('args')).then(() => location.reload()).catch(x => nbFlash(x.message));
+    });
+
+    // Runs
+    $(document).on('click', '.nb-run', e => nbPost('run', {app: $(e.currentTarget).data('app') || null}).then(() => location.reload()).catch(x => nbFlash(x.message)));
+    $(document).on('click', '.nb-run-items', e => $('#nbRun' + $(e.currentTarget).data('run')).toggleClass('d-none'));
+    $('#nbRefresh').on('click', () => nbPost('refresh_inventory').then(() => location.reload()).catch(x => nbFlash(x.message)));
     if (NB.waiting) setInterval(async () => {
         try {
             const r = await (await fetch('ajax-nightly-backup.php?action=status')).json();
-            if (!r.queued && !(r.run && r.run.running)) location.reload();
+            if (!r.queued && !r.running) location.reload();
         } catch (e) {}
     }, 10000);
     </script>
