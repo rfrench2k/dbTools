@@ -1,5 +1,5 @@
 <?php
-// Nightly Backup (D:\AdvancedVentures\BackupJob\backup.php): its settings, servers, apps and what each backs up -
+// Nightly Backup (D:\Projects\BackupJob\backup.php): its settings, servers, apps and what each backs up -
 // every one a row in the tools database (backup_* tables) that can be added, changed or removed here through
 // ajax-nightly-backup.php - plus the run history, what is NOT backed up, and Run now.
 $pageTitle = 'Nightly Backup';
@@ -306,7 +306,7 @@ foreach ($notBackedUp as $x) {
                 <p class="mb-1"><strong>MySQL:</strong> unzip, create an empty database, <code>mysql -h 127.0.0.1 -P 3307 -u sysdba &lt;db&gt; &lt; file.sql</code></p>
                 <p class="mb-1"><strong>Postgres:</strong> unzip, <code>createdb &lt;db&gt;</code>, <code>psql -h 127.0.0.1 -U postgres -d &lt;db&gt; -f file.sql</code></p>
                 <p class="mb-1"><strong>Qdrant:</strong> unzip, then POST the <code>.snapshot</code> to <code>http://127.0.0.1:6333/collections/&lt;collection&gt;/snapshots/upload</code> (api-key header).</p>
-                <p class="mb-0"><strong>Files:</strong> copy back from <code>&lt;App&gt;/files/&lt;folder&gt;</code>. More: <code>D:\AdvancedVentures\BackupJob\README.md</code>.</p>
+                <p class="mb-0"><strong>Files:</strong> copy back from <code>&lt;App&gt;/files/&lt;folder&gt;</code>. More: <code>D:\Projects\BackupJob\README.md</code>.</p>
             </div>
         </details>
     </div>
