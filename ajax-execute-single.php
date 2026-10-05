@@ -7,7 +7,7 @@
  * - objectType: Type of object (table, view, procedure, function, trigger, event)
  * - objectName: Name of the object
  * - objectStatus: Status (missing-in-target, different)
- * - sourceEnv: Source environment ID (e.g., '84-local')
+ * - sourceEnv: Source environment ID (e.g., '95-local')
  * - targetEnv: Target environment ID (e.g., '84-prod')
  */
 

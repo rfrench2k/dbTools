@@ -5,28 +5,21 @@
  * ============================================================================
  *
  * Copy this file to config.php and update with your actual credentials.
- * Multi-environment support for MySQL 8.4 and 9.5
+ * MySQL 9.5 only (port 3307). The old 8.4 server (3306) is not used.
  */
 
 // ============================================================================
 // DATABASES TO BACKUP - EDIT THIS LIST!
 // ============================================================================
 $DATABASES_TO_BACKUP = [
-    'database1',
-    'database2',
-    // Add your databases here
+    'APPINV', 'auth_db', 'BOBBLEHEADS', 'CARDS', 'Fantasy', 'health', 'INVEST', 'lahman', 'music', 'openai',
+    // Only used by scheduled-backup.php, which SKServer does not schedule (Backup - Nightly handles backups)
 ];
 
 // ============================================================================
 // MYSQL VERSION CONFIGURATIONS
 // ============================================================================
 $MYSQL_VERSIONS = [
-    '8.4' => [
-        'label' => 'MySQL 8.4',
-        'port' => 3306,
-        'mysqldump' => 'C:\\Program Files\\MySQL\\MySQL Server 8.4\\bin\\mysqldump.exe',
-        'mysql' => 'C:\\Program Files\\MySQL\\MySQL Server 8.4\\bin\\mysql.exe',
-    ],
     '9.5' => [
         'label' => 'MySQL 9.5',
         'port' => 3307,
@@ -39,38 +32,16 @@ $MYSQL_VERSIONS = [
 // ENVIRONMENT DEFINITIONS
 // ============================================================================
 $DB_ENVIRONMENTS = [
-    // MySQL 8.4 environments (port 3306)
-    '84-local' => [
-        'id' => '84-local',
-        'label' => 'Local (DEV)',
-        'host' => 'localhost',
-        'port' => 3306,
-        'user' => 'your_username',
-        'pass' => 'your_password',
-        'version' => '8.4',
-        'type' => 'dev',
-    ],
-    '84-production' => [
-        'id' => '84-production',
-        'label' => 'Production Server (PROD)',
-        'host' => '192.168.x.x',
-        'port' => 3306,
-        'user' => 'your_username',
-        'pass' => 'your_password',
-        'version' => '8.4',
-        'type' => 'prod',
-    ],
-
-    // MySQL 9.5 environments (port 3307)
+    // SKServer uses only MySQL 9.5 (port 3307).
     '95-local' => [
         'id' => '95-local',
-        'label' => 'Local (DEV)',
+        'label' => 'SKServer MySQL 9.5',
         'host' => 'localhost',
         'port' => 3307,
         'user' => 'your_username',
         'pass' => 'your_password',
         'version' => '9.5',
-        'type' => 'dev',
+        'type' => 'prod',
     ],
 ];
 
@@ -127,14 +98,19 @@ function getMysqlPath($envId) {
 // ============================================================================
 // LEGACY COMPATIBILITY (for existing code that uses old constants)
 // ============================================================================
-define('DB_TEST_HOST', 'localhost');
+// host:port - PDO/mysqli accept it as is; shell commands use dbHostName()/dbHostPort()
+define('DB_TEST_HOST', 'localhost:3307');
 define('DB_TEST_USER', 'your_username');
 define('DB_TEST_PASS', 'your_password');
-define('DB_PROD_HOST', '192.168.x.x');
+define('DB_PROD_HOST', 'localhost:3307');
 define('DB_PROD_USER', 'your_username');
 define('DB_PROD_PASS', 'your_password');
-define('MYSQLDUMP_PATH', 'C:\\Program Files\\MySQL\\MySQL Server 8.4\\bin\\mysqldump.exe');
-define('MYSQL_PATH', 'C:\\Program Files\\MySQL\\MySQL Server 8.4\\bin\\mysql.exe');
+define('MYSQLDUMP_PATH', 'C:\\Program Files\\MySQL\\MySQL Server 9.5\\bin\\mysqldump.exe');
+define('MYSQL_PATH', 'C:\\Program Files\\MySQL\\MySQL Server 9.5\\bin\\mysql.exe');
+
+// Split 'host:port' for mysqldump/mysql command lines (-h host -P port)
+function dbHostName($hostPort) { return explode(':', $hostPort)[0]; }
+function dbHostPort($hostPort) { $p = explode(':', $hostPort); return (int)($p[1] ?? 3307); }
 
 // ============================================================================
 // BACKUP DIRECTORY
@@ -158,6 +134,9 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 ini_set('log_errors', 1);
 ini_set('max_execution_time', 300); // 5 minutes
+
+// Used by backup-schedule-config.php (missing from the example)
+define('APP_ENV', 'prod');
 
 // Backup retention policy
 define('BACKUP_RETENTION_DAYS', 30);

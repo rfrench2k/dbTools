@@ -216,9 +216,9 @@ function testBackup() {
         if ($backupType === 'single' && !empty($table)) {
             // Single table - no --databases flag
             $command = sprintf(
-                '"%s" -h%s -u%s -p%s --routines --triggers --single-transaction --lock-tables=false %s %s > %s 2>&1',
+                '"%s" -h%s -P%d -u%s -p%s --routines --triggers --single-transaction --lock-tables=false %s %s > %s 2>&1',
                 $mysqldump,
-                DB_PROD_HOST,
+                dbHostName(DB_PROD_HOST), dbHostPort(DB_PROD_HOST),
                 DB_PROD_USER,
                 DB_PROD_PASS,
                 escapeshellarg($database),
@@ -228,9 +228,9 @@ function testBackup() {
         } else {
             // Full database - use --databases flag
             $command = sprintf(
-                '"%s" -h%s -u%s -p%s --routines --triggers --single-transaction --lock-tables=false --add-drop-database --databases %s > %s 2>&1',
+                '"%s" -h%s -P%d -u%s -p%s --routines --triggers --single-transaction --lock-tables=false --add-drop-database --databases %s > %s 2>&1',
                 $mysqldump,
-                DB_PROD_HOST,
+                dbHostName(DB_PROD_HOST), dbHostPort(DB_PROD_HOST),
                 DB_PROD_USER,
                 DB_PROD_PASS,
                 escapeshellarg($database),
@@ -368,7 +368,6 @@ function findMysqldump() {
 
     // Fallback: try to find it
     $possiblePaths = [
-        'C:\\Program Files\\MySQL\\MySQL Server 8.4\\bin\\mysqldump.exe',
         'C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysqldump.exe',
         'C:\\Program Files\\MySQL\\MySQL Server 5.7\\bin\\mysqldump.exe',
         'mysqldump',

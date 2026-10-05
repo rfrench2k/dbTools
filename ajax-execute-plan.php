@@ -114,9 +114,9 @@ function backupDatabase($dbname, $type) {
         // Use mysqldump to create backup with all proper flags
         $mysqldump = defined('MYSQLDUMP_PATH') ? MYSQLDUMP_PATH : 'mysqldump';
         $command = sprintf(
-            '"%s" -h%s -u%s -p%s --routines --triggers --single-transaction --lock-tables=false --add-drop-database --databases %s > %s 2>&1',
+            '"%s" -h%s -P%d -u%s -p%s --routines --triggers --single-transaction --lock-tables=false --add-drop-database --databases %s > %s 2>&1',
             $mysqldump,
-            DB_PROD_HOST,
+            dbHostName(DB_PROD_HOST), dbHostPort(DB_PROD_HOST),
             DB_PROD_USER,
             DB_PROD_PASS,
             escapeshellarg($dbname),
@@ -176,9 +176,9 @@ function backupTables($dbname, $tables) {
         $mysqldump = defined('MYSQLDUMP_PATH') ? MYSQLDUMP_PATH : 'mysqldump';
 
         $command = sprintf(
-            '"%s" -h%s -u%s -p%s --routines --triggers --single-transaction --lock-tables=false %s %s > %s 2>&1',
+            '"%s" -h%s -P%d -u%s -p%s --routines --triggers --single-transaction --lock-tables=false %s %s > %s 2>&1',
             $mysqldump,
-            DB_PROD_HOST,
+            dbHostName(DB_PROD_HOST), dbHostPort(DB_PROD_HOST),
             DB_PROD_USER,
             DB_PROD_PASS,
             escapeshellarg($dbname),

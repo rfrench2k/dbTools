@@ -21,7 +21,7 @@ require_once __DIR__ . '/config.php';
  * @return array Result with success status, filepath, filesize, etc.
  */
 function createDatabaseBackup($host, $user, $password, $database, $backupDir, $filenamePrefix = null) {
-    return createDatabaseBackupWithPath($host, $user, $password, $database, $backupDir, $filenamePrefix, 3306, null);
+    return createDatabaseBackupWithPath($host, $user, $password, $database, $backupDir, $filenamePrefix, 3307, null);
 }
 
 /**
@@ -33,11 +33,12 @@ function createDatabaseBackup($host, $user, $password, $database, $backupDir, $f
  * @param string $database Database name
  * @param string $backupDir Directory to save backup
  * @param string $filenamePrefix Prefix for backup filename (e.g., "DatabaseName-Prod")
- * @param int $port Database port (default 3306)
+ * @param int $port Database port (default 3307 = MySQL 9.5)
  * @param string|null $mysqldumpPath Path to mysqldump executable (null to auto-detect)
  * @return array Result with success status, filepath, filesize, etc.
  */
-function createDatabaseBackupWithPath($host, $user, $password, $database, $backupDir, $filenamePrefix = null, $port = 3306, $mysqldumpPath = null) {
+function createDatabaseBackupWithPath($host, $user, $password, $database, $backupDir, $filenamePrefix = null, $port = 3307, $mysqldumpPath = null) {
+    if (strpos($host, ":") !== false) { [$host, $port] = explode(":", $host, 2); $port = (int)$port; }   // "localhost:3307"
     try {
         // Find mysqldump
         $mysqldump = $mysqldumpPath;
@@ -140,7 +141,6 @@ function findMysqldumpExecutable() {
     // Fallback: try to find it (check both MySQL versions)
     $possiblePaths = [
         'C:\\Program Files\\MySQL\\MySQL Server 9.5\\bin\\mysqldump.exe',
-        'C:\\Program Files\\MySQL\\MySQL Server 8.4\\bin\\mysqldump.exe',
         'C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysqldump.exe',
         'C:\\Program Files\\MySQL\\MySQL Server 5.7\\bin\\mysqldump.exe',
         'mysqldump',

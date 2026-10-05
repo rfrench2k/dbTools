@@ -10,7 +10,7 @@ require_once __DIR__ . '/config.php';
 /**
  * Get PDO connection to a specific environment by ID
  *
- * @param string $envId Environment ID (e.g., '84-local', '95-skserver')
+ * @param string $envId Environment ID (e.g., '95-local')
  * @param string|null $dbname Optional database name
  * @return PDO
  * @throws Exception if connection fails or environment not found

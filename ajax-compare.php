@@ -4,7 +4,7 @@
  *
  * Parameters:
  * - database: Database name to compare
- * - sourceEnv: Source environment ID (e.g., '84-local')
+ * - sourceEnv: Source environment ID (e.g., '95-local')
  * - targetEnv: Target environment ID (e.g., '84-prod')
  */
 
