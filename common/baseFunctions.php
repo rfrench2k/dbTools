@@ -6,7 +6,7 @@ ini_set('log_errors', 1);
 
 // Application Settings
 define('APP_ROOT', dirname(__DIR__));
-define('LOG_FILE_PATH', APP_ROOT . '/dbtools.log');
+define('LOG_FILE_PATH', 'D:/AdvancedVentures/logs/dbtools/dbtools.log');
 
 /**
  * Enhanced logging function

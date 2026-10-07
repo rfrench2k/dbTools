@@ -32,12 +32,6 @@ function nb_envName($x) {
     if (!preg_match('/^[A-Z][A-Z0-9_]{1,59}$/', (string)$x)) throw new RuntimeException('Environment variable names: upper-case letters, numbers, _');
     return $x;
 }
-function nb_excludes($itemId, $text) {
-    $list = array_values(array_unique(array_filter(array_map('trim', explode(',', (string)$text)), 'strlen')));
-    foreach ($list as $x) if (!preg_match('/^[A-Za-z0-9*?._ -]{1,100}$/', $x)) throw new RuntimeException("Skip pattern not allowed: $x");
-    nb_q('DELETE FROM backup_item_excludes WHERE item_id = ?', [$itemId]);
-    foreach ($list as $x) nb_q('INSERT INTO backup_item_excludes (item_id, pattern) VALUES (?, ?)', [$itemId, $x]);
-}
 
 try {
     switch ($action) {
@@ -55,7 +49,6 @@ try {
                 case 'restore_test_day': $v = nb_int($v, 1, 28, 'Day of month'); break;
                 case 'keep_versions': $v = nb_int($v, 1, 365, 'Copies'); break;
                 case 'keep_monthly': $v = nb_int($v, 0, 120, 'Months'); break;
-                case 'keep_deleted_files_days': $v = nb_int($v, 1, 365, 'Days'); break;
                 case 'email_to': if (!filter_var($v, FILTER_VALIDATE_EMAIL)) throw new RuntimeException('Not an email address'); break;
                 case 'email_summary': if (!in_array($v, ['errors', 'weekly', 'daily'], true)) throw new RuntimeException('Pick one'); break;
                 case 'rclone_remote': if (!preg_match('/^[A-Za-z0-9_-]+:[A-Za-z0-9 _\/.-]*$/', $v)) throw new RuntimeException('Format: remote:folder (e.g. dbBackup:dbBackup)'); break;
@@ -122,7 +115,7 @@ try {
 
         case 'delete_app':
             $id = nb_appId($in['app'] ?? '');
-            if (nb_q('SELECT COUNT(*) FROM backup_items WHERE app_id = ?', [$id])->fetchColumn()) throw new RuntimeException('Remove its databases and folders first');
+            if (nb_q('SELECT COUNT(*) FROM backup_items WHERE app_id = ?', [$id])->fetchColumn()) throw new RuntimeException('Remove its databases first');
             nb_q('DELETE FROM backup_apps WHERE id = ?', [$id]);
             nb_out(['ok' => true]);
 
@@ -130,32 +123,13 @@ try {
         case 'add_item':
             $appId = nb_appId($in['app'] ?? '');
             $kind = $in['kind'] ?? '';
-            if ($kind === 'folder') {
-                $path = rtrim(trim($in['path'] ?? ''), '\\/');
-                $name = trim($in['name'] ?? '');
-                if (!preg_match('/^[A-Za-z]:\\\\/', $path . '\\') || !is_dir($path)) throw new RuntimeException("Folder not found: $path");
-                if (!preg_match('/^[A-Za-z0-9._-]{1,40}$/', $name)) throw new RuntimeException('Short name: letters, numbers, . _ - (it becomes the folder name on Drive)');
-                if (nb_q("SELECT 1 FROM backup_items WHERE app_id = ? AND kind = 'folder' AND name = ?", [$appId, $name])->fetchColumn()) throw new RuntimeException("This app already has a folder named $name");
-                nb_q("INSERT INTO backup_items (app_id, kind, name, path, what) VALUES (?, 'folder', ?, ?, ?)", [$appId, $name, $path, trim($in['what'] ?? '') ?: null]);
-                nb_excludes((int)nb_db()->lastInsertId(), $in['exclude'] ?? '');
-            } else {
-                if (!in_array($kind, ['database', 'collection'], true)) throw new RuntimeException('Unknown kind');
-                $server = $in['server'] ?? '';
-                $name = $in['name'] ?? '';
-                if (!nb_q('SELECT 1 FROM backup_inventory WHERE server_id = ? AND name = ?', [$server, $name])->fetchColumn()) throw new RuntimeException("$name is not on $server (press Refresh list if it is new)");
-                if ($by = nb_q('SELECT a.name FROM backup_items i JOIN backup_apps a ON a.id = i.app_id WHERE i.server_id = ? AND i.name = ?', [$server, $name])->fetchColumn())
-                    throw new RuntimeException("$name is already backed up by $by");
-                nb_q('INSERT INTO backup_items (app_id, kind, server_id, name) VALUES (?, ?, ?, ?)', [$appId, $kind, $server, $name]);
-            }
-            nb_out(['ok' => true]);
-
-        case 'update_folder':
-            $id = (int)($in['id'] ?? 0);
-            $path = rtrim(trim($in['path'] ?? ''), '\\/');
-            if (!nb_q("SELECT 1 FROM backup_items WHERE id = ? AND kind = 'folder'", [$id])->fetchColumn()) throw new RuntimeException('Folder not found');
-            if (!preg_match('/^[A-Za-z]:\\\\/', $path . '\\') || !is_dir($path)) throw new RuntimeException("Folder not found: $path");
-            nb_q('UPDATE backup_items SET path = ?, what = ? WHERE id = ?', [$path, trim($in['what'] ?? '') ?: null, $id]);
-            nb_excludes($id, $in['exclude'] ?? '');
+            if (!in_array($kind, ['database', 'collection'], true)) throw new RuntimeException('Unknown kind');
+            $server = $in['server'] ?? '';
+            $name = $in['name'] ?? '';
+            if (!nb_q('SELECT 1 FROM backup_inventory WHERE server_id = ? AND name = ?', [$server, $name])->fetchColumn()) throw new RuntimeException("$name is not on $server (press Refresh list if it is new)");
+            if ($by = nb_q('SELECT a.name FROM backup_items i JOIN backup_apps a ON a.id = i.app_id WHERE i.server_id = ? AND i.name = ?', [$server, $name])->fetchColumn())
+                throw new RuntimeException("$name is already backed up by $by");
+            nb_q('INSERT INTO backup_items (app_id, kind, server_id, name) VALUES (?, ?, ?, ?)', [$appId, $kind, $server, $name]);
             nb_out(['ok' => true]);
 
         case 'delete_item':

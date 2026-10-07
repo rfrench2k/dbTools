@@ -6,7 +6,7 @@
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
     $log = sprintf("[%s] PHP Error %d: %s in %s on line %d\n",
         date('Y-m-d H:i:s'), $errno, $errstr, $errfile, $errline);
-    file_put_contents($_SERVER['DOCUMENT_ROOT'] . '/dbtools/php_errors.log', $log, FILE_APPEND);
+    file_put_contents('D:/AdvancedVentures/logs/dbtools/php_errors.log', $log, FILE_APPEND);
     return false; // Let PHP handle it normally too
 });
 register_shutdown_function(function() {
@@ -14,7 +14,7 @@ register_shutdown_function(function() {
     if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
         $log = sprintf("[%s] FATAL: %s in %s on line %d\n",
             date('Y-m-d H:i:s'), $error['message'], $error['file'], $error['line']);
-        file_put_contents($_SERVER['DOCUMENT_ROOT'] . '/dbtools/php_errors.log', $log, FILE_APPEND);
+        file_put_contents('D:/AdvancedVentures/logs/dbtools/php_errors.log', $log, FILE_APPEND);
     }
 });
 

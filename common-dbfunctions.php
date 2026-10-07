@@ -308,7 +308,7 @@ function sendSuccess($data = []) {
  * Log error to file
  */
 function logError($message, $context = []) {
-    $logFile = __DIR__ . '/error.log';
+    $logFile = 'D:/AdvancedVentures/logs/dbtools/error.log';
     $timestamp = date('Y-m-d H:i:s');
 
     $logEntry = "[$timestamp] $message\n";
@@ -326,7 +326,7 @@ function logError($message, $context = []) {
  * Log SQL execution
  */
 function logSql($database, $objectType, $objectName, $sql, $success, $error = null) {
-    $logFile = __DIR__ . '/sql-execution.log';
+    $logFile = 'D:/AdvancedVentures/logs/dbtools/sql-execution.log';
     $timestamp = date('Y-m-d H:i:s');
 
     $logEntry = "[$timestamp] " . ($success ? "SUCCESS" : "FAILED") . "\n";

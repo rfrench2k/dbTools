@@ -62,8 +62,8 @@ include $_SERVER['DOCUMENT_ROOT'] . '/dbtools/common/Header.php';
         </div>
 
         <?php
-        $errorLogFile = __DIR__ . '/error.log';
-        $sqlLogFile = __DIR__ . '/sql-execution.log';
+        $errorLogFile = 'D:/AdvancedVentures/logs/dbtools/error.log';
+        $sqlLogFile = 'D:/AdvancedVentures/logs/dbtools/sql-execution.log';
         ?>
 
         <!-- Error Log -->

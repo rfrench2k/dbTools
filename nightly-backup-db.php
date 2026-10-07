@@ -26,7 +26,6 @@ function nb_settingDefs() {
         'restore_test_day' => ['Restore test day', 'number:1:28', "Restores each database's newest copy into a scratch database to prove it works, then drops it."],
         'keep_versions' => ['Copies kept', 'number:1:365', 'Per database / collection (an app can have its own).'],
         'keep_monthly' => ['Monthly copies kept', 'number:0:120', 'Plus the newest copy of each of this many months.'],
-        'keep_deleted_files_days' => ['Replaced / deleted files kept (days)', 'number:1:365', 'For folders: files deleted or overwritten on the server stay on Drive this long.'],
         'email_to' => ['Email to', 'email', ''],
         'email_summary' => ['Email me', 'summary', 'Runs with errors always email.'],
         'rclone_remote' => ['Google Drive location', 'text', 'rclone remote:folder. Changing it starts new copies there; the old ones stay where they are.'],

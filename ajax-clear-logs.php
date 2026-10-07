@@ -15,8 +15,8 @@ if (!$userId) {
 }
 
 try {
-    $errorLogFile = __DIR__ . '/error.log';
-    $sqlLogFile = __DIR__ . '/sql-execution.log';
+    $errorLogFile = 'D:/AdvancedVentures/logs/dbtools/error.log';
+    $sqlLogFile = 'D:/AdvancedVentures/logs/dbtools/sql-execution.log';
 
     // Clear error log
     if (file_exists($errorLogFile)) {

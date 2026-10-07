@@ -3,27 +3,27 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
-ini_set('error_log', __DIR__ . '/php_errors.log');
+ini_set('error_log', 'D:/AdvancedVentures/logs/dbtools/php_errors.log');
 
 // Catch fatal errors
 register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
-        file_put_contents(__DIR__ . '/php_errors.log',
+        file_put_contents('D:/AdvancedVentures/logs/dbtools/php_errors.log',
             "[" . date('Y-m-d H:i:s') . "] FATAL ERROR: {$error['message']} in {$error['file']} on line {$error['line']}\n",
             FILE_APPEND);
     }
 });
 
 // Log entry point
-file_put_contents(__DIR__ . '/php_errors.log',
+file_put_contents('D:/AdvancedVentures/logs/dbtools/php_errors.log',
     "[" . date('Y-m-d H:i:s') . "] index.php STARTED - DOCUMENT_ROOT=" . ($_SERVER['DOCUMENT_ROOT'] ?? 'NOT SET') . "\n",
     FILE_APPEND);
 
 $pageTitle = 'Database Management Tools';
 
 $headerFile = $_SERVER['DOCUMENT_ROOT'] . '/dbtools/common/Header.php';
-file_put_contents(__DIR__ . '/php_errors.log',
+file_put_contents('D:/AdvancedVentures/logs/dbtools/php_errors.log',
     "[" . date('Y-m-d H:i:s') . "] About to include: $headerFile (exists: " . (file_exists($headerFile) ? 'YES' : 'NO') . ")\n",
     FILE_APPEND);
 
