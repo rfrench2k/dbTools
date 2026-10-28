@@ -52,6 +52,8 @@ $summaryText = ['errors' => 'Only when something fails', 'weekly' => 'Errors, pl
 $kindLabel = ['mysql' => 'MySQL', 'postgres' => 'Postgres', 'qdrant' => 'Qdrant'];
 $serverById = array_column($servers, null, 'id');
 $serverLabel = fn($id) => isset($serverById[$id]) ? $kindLabel[$serverById[$id]['kind']] . (isset($serverById[$id]['port']) ? ' :' . $serverById[$id]['port'] : '') . " ($id)" : $id;
+// what each line's database is on, the short way: postgres, qdrant, or the MySQL server's own id (mysql95, mysql84)
+$dbTag = fn($id) => '<span class="badge text-bg-light border nb-db">' . nb_h(($serverById[$id]['kind'] ?? '') === 'mysql' ? $id : ($serverById[$id]['kind'] ?? $id)) . '</span>';
 $shown = function ($name, $v) use ($days, $summaryText) {
     switch ($name) {
         case 'schedule_time': return date('g:i A', strtotime($v));
@@ -137,7 +139,7 @@ foreach ($notBackedUp as $x) {
                 </div>
                 <div class="table-responsive">
                     <table class="table table-sm nb-tbl nb-apps mb-0">
-                        <thead class="table-light"><tr><th>On</th><th>App</th><th>Database · last copy (MySQL 9.5 unless shown)</th><th></th></tr></thead>
+                        <thead class="table-light"><tr><th>On</th><th>App</th><th>Database · last copy</th><th></th></tr></thead>
                         <tbody>
                         <?php foreach ($apps as $a):
                             $mine = $itemsByApp[$a['id']] ?? [];
@@ -151,7 +153,7 @@ foreach ($notBackedUp as $x) {
                                 </td>
                                 <td class="nb-dbs">
                                     <?php foreach ($dbs as $i): ?>
-                                        <div class="nb-item"><div><?= nb_h($i['name']) ?><span class="text-muted nb-sub"><?= $i['server_id'] !== 'mysql95' ? ' · ' . nb_h($serverLabel($i['server_id'])) : '' ?> · <?= nb_short($i['last_upload']) ?><?= $i['last_mb'] !== null ? ' · ' . nb_h($i['last_mb']) . ' MB' : '' ?></span></div>
+                                        <div class="nb-item"><div><?= $dbTag($i['server_id']) ?> <?= nb_h($i['name']) ?><span class="text-muted nb-sub"> · <?= nb_short($i['last_upload']) ?><?= $i['last_mb'] !== null ? ' · ' . nb_h($i['last_mb']) . ' MB' : '' ?></span></div>
                                             <button class="nb-x nb-del" data-action="delete_item" data-args="<?= nb_h(json_encode(['id' => (int)$i['id']])) ?>" title="Remove from the backup (copies already on Drive are kept)"><i class="bi bi-x-circle"></i></button>
                                         </div>
                                     <?php endforeach; ?>
@@ -189,7 +191,7 @@ foreach ($notBackedUp as $x) {
                         <?php foreach ($notBackedUp as $n): $k = ($serverById[$n['server_id']]['kind'] ?? '') === 'qdrant' ? 'collection' : 'database'; ?>
                             <tr>
                                 <td><?= nb_h($n['name']) ?></td>
-                                <td><?= nb_h($serverLabel($n['server_id'])) ?></td>
+                                <td><?= $dbTag($n['server_id']) ?></td>
                                 <td><?= $n['points'] !== null ? number_format($n['points']) . ' points' : nb_h($n['mb']) . ' MB' ?></td>
                                 <td class="text-end text-nowrap">
                                     <button class="btn btn-sm btn-outline-success nb-add" data-kind="<?= $k ?>" data-pick="<?= nb_h($n['server_id'] . '|' . $n['name']) ?>"><i class="bi bi-plus-lg"></i> Add to backup</button>
@@ -206,7 +208,7 @@ foreach ($notBackedUp as $x) {
                     <?php foreach ($exclusions as $x): ?>
                         <tr>
                             <td style="width:22%"><?= nb_h($x['name']) ?></td>
-                            <td style="width:22%" class="nb-sub"><?= nb_h($serverLabel($x['server_id'])) ?></td>
+                            <td style="width:22%" class="nb-sub"><?= $dbTag($x['server_id']) ?></td>
                             <td class="nb-sub"><?= nb_h($x['reason']) ?></td>
                             <td class="text-end text-nowrap">
                                 <button class="btn btn-sm btn-outline-secondary nb-exclude" data-server="<?= nb_h($x['server_id']) ?>" data-name="<?= nb_h($x['name']) ?>" data-reason="<?= nb_h($x['reason']) ?>" title="Change"><i class="bi bi-pencil"></i></button>
