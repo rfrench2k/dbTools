@@ -4,6 +4,7 @@
  */
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/dbtools/common/common.php';
+dbtoolsRequireAction();   // SUPERADMIN, from DB Tools' own pages only
 
 header('Content-Type: application/json');
 
@@ -29,7 +30,7 @@ try {
     }
 
     // Connect to TEST to analyze dependencies
-    $testPdo = getTestConnection();
+    $testPdo = getEnvConnection(DBTOOLS_ENV);
 
     // Order tables by dependencies
     $orderedTables = orderTablesByDependencies($testPdo, $dbname, $tables);

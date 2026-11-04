@@ -4,6 +4,8 @@
  */
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/dbtools/common/common.php';
+require_once __DIR__ . '/backup-lib.php';   // createDatabaseBackup()
+dbtoolsRequireAction();   // SUPERADMIN, from DB Tools' own pages only
 
 header('Content-Type: application/json');
 
@@ -30,7 +32,7 @@ try {
     }
 
     // Connect to PROD
-    $prodPdo = getProdConnection($dbname);
+    $prodPdo = getEnvConnection(DBTOOLS_ENV, $dbname);
     $prodPdo->setAttribute(PDO::ATTR_AUTOCOMMIT, 0);
 
     $result = [
@@ -107,131 +109,45 @@ try {
  * Backup entire database
  */
 function backupDatabase($dbname, $type) {
-    try {
-        $timestamp = date('Y-m-d-Hi');
-        $backupFile = BACKUP_DIR . "{$dbname}-Prod-{$timestamp}.sql";
-
-        // Use mysqldump to create backup with all proper flags
-        $mysqldump = defined('MYSQLDUMP_PATH') ? MYSQLDUMP_PATH : 'mysqldump';
-        $command = sprintf(
-            '"%s" -h%s -P%d -u%s -p%s --routines --triggers --single-transaction --lock-tables=false --add-drop-database --databases %s > %s 2>&1',
-            $mysqldump,
-            dbHostName(DB_PROD_HOST), dbHostPort(DB_PROD_HOST),
-            DB_PROD_USER,
-            DB_PROD_PASS,
-            escapeshellarg($dbname),
-            escapeshellarg($backupFile)
-        );
-
-        exec($command, $output, $returnCode);
-
-        if ($returnCode !== 0) {
-            return [
-                'success' => false,
-                'message' => 'Backup failed: ' . implode("\n", $output)
-            ];
-        }
-
-        // Check if backup file was created and has content
-        if (!file_exists($backupFile) || filesize($backupFile) === 0) {
-            return [
-                'success' => false,
-                'message' => 'Backup file was not created or is empty'
-            ];
-        }
-
-        $fileSize = formatFileSize(filesize($backupFile));
-
-        return [
-            'success' => true,
-            'message' => "Full database backup created: $backupFile ($fileSize)",
-            'file' => $backupFile
-        ];
-
-    } catch (Exception $e) {
+    $backup = createDatabaseBackup(dbtoolsServer(), $dbname, BACKUP_DIR, "{$dbname}-Prod");
+    if (!$backup['success']) {
         return [
             'success' => false,
-            'message' => 'Backup error: ' . $e->getMessage()
+            'message' => 'Backup failed: ' . $backup['error']
         ];
     }
+
+    return [
+        'success' => true,
+        'message' => "Full database backup created: {$backup['filepath']} ({$backup['fileSize']})",
+        'file' => $backup['filepath']
+    ];
 }
 
 /**
  * Backup specific tables
  */
 function backupTables($dbname, $tables) {
-    try {
-        if (empty($tables)) {
-            return [
-                'success' => true,
-                'message' => 'No tables to backup'
-            ];
-        }
-
-        $timestamp = date('Y-m-d-Hi');
-        $backupFile = BACKUP_DIR . "{$dbname}-Prod-{$timestamp}.sql";
-
-        // Use mysqldump to backup specific tables with proper flags
-        $tableList = implode(' ', array_map('escapeshellarg', $tables));
-        $mysqldump = defined('MYSQLDUMP_PATH') ? MYSQLDUMP_PATH : 'mysqldump';
-
-        $command = sprintf(
-            '"%s" -h%s -P%d -u%s -p%s --routines --triggers --single-transaction --lock-tables=false %s %s > %s 2>&1',
-            $mysqldump,
-            dbHostName(DB_PROD_HOST), dbHostPort(DB_PROD_HOST),
-            DB_PROD_USER,
-            DB_PROD_PASS,
-            escapeshellarg($dbname),
-            $tableList,
-            escapeshellarg($backupFile)
-        );
-
-        exec($command, $output, $returnCode);
-
-        if ($returnCode !== 0) {
-            return [
-                'success' => false,
-                'message' => 'Table backup failed: ' . implode("\n", $output)
-            ];
-        }
-
-        // Check if backup file was created and has content
-        if (!file_exists($backupFile) || filesize($backupFile) === 0) {
-            return [
-                'success' => false,
-                'message' => 'Backup file was not created or is empty'
-            ];
-        }
-
-        $fileSize = formatFileSize(filesize($backupFile));
-        $tableCount = count($tables);
-
+    if (empty($tables)) {
         return [
             'success' => true,
-            'message' => "Backed up $tableCount table(s): $backupFile ($fileSize)",
-            'file' => $backupFile
+            'message' => 'No tables to backup'
         ];
+    }
 
-    } catch (Exception $e) {
+    $backup = createDatabaseBackup(dbtoolsServer(), $dbname, BACKUP_DIR, "{$dbname}-Prod-Tables", $tables);
+    if (!$backup['success']) {
         return [
             'success' => false,
-            'message' => 'Backup error: ' . $e->getMessage()
+            'message' => 'Table backup failed: ' . $backup['error']
         ];
     }
-}
 
-/**
- * Format file size
- */
-function formatFileSize($bytes) {
-    if ($bytes >= 1073741824) {
-        return number_format($bytes / 1073741824, 2) . ' GB';
-    } elseif ($bytes >= 1048576) {
-        return number_format($bytes / 1048576, 2) . ' MB';
-    } elseif ($bytes >= 1024) {
-        return number_format($bytes / 1024, 2) . ' KB';
-    } else {
-        return $bytes . ' bytes';
-    }
+    $tableCount = count($tables);
+    return [
+        'success' => true,
+        'message' => "Backed up $tableCount table(s): {$backup['filepath']} ({$backup['fileSize']})",
+        'file' => $backup['filepath']
+    ];
 }
 ?>

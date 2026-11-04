@@ -196,26 +196,20 @@ include $_SERVER['DOCUMENT_ROOT'] . '/dbtools/common/Header.php';
             html += '<tr>';
             html += '<td><strong>mysqldump Available:</strong></td>';
             html += `<td><code>${data.mysqldumpPath || 'Not found'}</code></td>`;
-            html += `<td>${data.mysqldumpAvailable ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-danger">No - Need to install or add to PATH!</span>'}</td>`;
+            html += `<td>${data.mysqldumpAvailable ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-danger">No - check MYSQLDUMP_PATH in config.php</span>'}</td>`;
             html += '</tr>';
 
             html += '<tr>';
-            html += '<td><strong>TEST Connection:</strong></td>';
-            html += `<td>${data.testConnection.host}</td>`;
-            html += `<td>${data.testConnection.success ? '<span class="badge bg-success">Connected</span>' : '<span class="badge bg-danger">Failed: ' + data.testConnection.error + '</span>'}</td>`;
-            html += '</tr>';
-
-            html += '<tr>';
-            html += '<td><strong>PROD Connection:</strong></td>';
-            html += `<td>${data.prodConnection.host}</td>`;
-            html += `<td>${data.prodConnection.success ? '<span class="badge bg-success">Connected</span>' : '<span class="badge bg-danger">Failed: ' + data.prodConnection.error + '</span>'}</td>`;
+            html += '<td><strong>Connection:</strong></td>';
+            html += `<td>${data.connection.host}</td>`;
+            html += `<td>${data.connection.success ? '<span class="badge bg-success">Connected</span>' : '<span class="badge bg-danger">Failed: ' + data.connection.error + '</span>'}</td>`;
             html += '</tr>';
 
             html += '</table>';
 
             // Overall status
             const allGood = data.backupDirExists && data.backupDirWritable && data.mysqldumpAvailable &&
-                           data.testConnection.success && data.prodConnection.success;
+                           data.connection.success;
 
             if (allGood) {
                 html += '<div class="alert alert-success"><i class="bi bi-check-circle"></i> <strong>All systems ready!</strong> You can proceed with testing backups.</div>';
@@ -227,10 +221,7 @@ include $_SERVER['DOCUMENT_ROOT'] . '/dbtools/common/Header.php';
                 // Provide specific help
                 if (!data.mysqldumpAvailable) {
                     html += '<div class="alert alert-warning">';
-                    html += '<strong>How to fix mysqldump:</strong><br>';
-                    html += '1. If MySQL is installed, find mysqldump.exe (usually in C:\\Program Files\\MySQL\\MySQL Server X.X\\bin\\)<br>';
-                    html += '2. Add that directory to your system PATH, OR<br>';
-                    html += '3. We can modify the code to use the full path to mysqldump.exe';
+                    html += '<strong>mysqldump:</strong> set MYSQLDUMP_PATH in config.php';
                     html += '</div>';
                 }
             }

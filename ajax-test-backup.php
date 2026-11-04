@@ -4,6 +4,8 @@
  */
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/dbtools/common/common.php';
+require_once __DIR__ . '/backup-lib.php';   // createDatabaseBackup()
+dbtoolsRequireAction();   // SUPERADMIN, from DB Tools' own pages only
 
 // Enable error reporting for debugging
 error_reporting(E_ALL);
@@ -80,79 +82,25 @@ function checkSystem() {
         $backupDirExists = file_exists(BACKUP_DIR);
     }
 
+    $server = dbtoolsServer();
     $result = [
         'backupDir' => BACKUP_DIR,
         'backupDirExists' => $backupDirExists,
         'backupDirWritable' => $backupDirWritable,
-        'mysqldumpAvailable' => false,
-        'mysqldumpPath' => null,
-        'testConnection' => [
-            'host' => DB_TEST_HOST,
-            'success' => false,
-            'error' => null
-        ],
-        'prodConnection' => [
-            'host' => DB_PROD_HOST,
+        'mysqldumpAvailable' => file_exists(MYSQLDUMP_PATH),
+        'mysqldumpPath' => MYSQLDUMP_PATH,
+        'connection' => [
+            'host' => $server['host'] . ':' . $server['port'],
             'success' => false,
             'error' => null
         ]
     ];
 
-    // Check mysqldump availability
-    // Try common Windows paths
-    $possiblePaths = [
-        'mysqldump', // In PATH
-        'C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysqldump.exe',
-        'C:\\Program Files\\MySQL\\MySQL Server 5.7\\bin\\mysqldump.exe',
-        'C:\\MySQL\\bin\\mysqldump.exe',
-        'C:\\xampp\\mysql\\bin\\mysqldump.exe',
-        'C:\\wamp\\bin\\mysql\\mysql8.0.27\\bin\\mysqldump.exe',
-    ];
-
-    foreach ($possiblePaths as $path) {
-        try {
-            $output = [];
-            $returnCode = 0;
-            @exec('"' . $path . '" --version 2>&1', $output, $returnCode);
-            if ($returnCode === 0 && !empty($output)) {
-                $result['mysqldumpAvailable'] = true;
-                $result['mysqldumpPath'] = $path;
-                break;
-            }
-        } catch (Exception $e) {
-            // Continue to next path
-        }
-    }
-
-    // If not found, try using 'where' command on Windows
-    if (!$result['mysqldumpAvailable']) {
-        try {
-            $whereOutput = [];
-            $whereCode = 0;
-            @exec('where mysqldump 2>&1', $whereOutput, $whereCode);
-            if ($whereCode === 0 && !empty($whereOutput)) {
-                $result['mysqldumpAvailable'] = true;
-                $result['mysqldumpPath'] = trim($whereOutput[0]);
-            }
-        } catch (Exception $e) {
-            // mysqldump not found
-        }
-    }
-
-    // Test TEST connection
     try {
-        $testPdo = getTestConnection();
-        $result['testConnection']['success'] = true;
+        getEnvConnection(DBTOOLS_ENV);
+        $result['connection']['success'] = true;
     } catch (Exception $e) {
-        $result['testConnection']['error'] = $e->getMessage();
-    }
-
-    // Test PROD connection
-    try {
-        $prodPdo = getProdConnection();
-        $result['prodConnection']['success'] = true;
-    } catch (Exception $e) {
-        $result['prodConnection']['error'] = $e->getMessage();
+        $result['connection']['error'] = $e->getMessage();
     }
 
     sendSuccess($result);
@@ -168,7 +116,7 @@ function getTablesFromDatabase() {
             throw new Exception("Database name required");
         }
 
-        $prodPdo = getProdConnection($dbname);
+        $prodPdo = getEnvConnection(DBTOOLS_ENV, $dbname);
         $stmt = $prodPdo->query("SHOW TABLES");
         $tables = [];
         while ($row = $stmt->fetch(PDO::FETCH_NUM)) {
@@ -195,65 +143,19 @@ function testBackup() {
             throw new Exception("Database name required");
         }
 
-        // Find mysqldump
-        $mysqldump = findMysqldump();
-        if (!$mysqldump) {
-            throw new Exception("mysqldump not found. Please install MySQL client tools or add to PATH.");
+        // Single table: only that table, its name in the file name
+        $single = ($backupType === 'single' && !empty($table));
+        $backup = createDatabaseBackup(
+            dbtoolsServer(),
+            $database,
+            BACKUP_DIR,
+            $single ? "{$database}-Prod-{$table}" : "{$database}-Prod",
+            $single ? [$table] : []
+        );
+        if (!$backup['success']) {
+            throw new Exception($backup['error']);
         }
-
-        $timestamp = date('Y-m-d-Hi');
-
-        if ($backupType === 'single' && !empty($table)) {
-            // For single table test backups, include table name
-            $backupFile = BACKUP_DIR . "{$database}-Prod-{$timestamp}-{$table}.sql";
-            $tableArg = escapeshellarg($table);
-        } else {
-            $backupFile = BACKUP_DIR . "{$database}-Prod-{$timestamp}.sql";
-            $tableArg = '';
-        }
-
-        // Build mysqldump command with proper flags
-        if ($backupType === 'single' && !empty($table)) {
-            // Single table - no --databases flag
-            $command = sprintf(
-                '"%s" -h%s -P%d -u%s -p%s --routines --triggers --single-transaction --lock-tables=false %s %s > %s 2>&1',
-                $mysqldump,
-                dbHostName(DB_PROD_HOST), dbHostPort(DB_PROD_HOST),
-                DB_PROD_USER,
-                DB_PROD_PASS,
-                escapeshellarg($database),
-                $tableArg,
-                escapeshellarg($backupFile)
-            );
-        } else {
-            // Full database - use --databases flag
-            $command = sprintf(
-                '"%s" -h%s -P%d -u%s -p%s --routines --triggers --single-transaction --lock-tables=false --add-drop-database --databases %s > %s 2>&1',
-                $mysqldump,
-                dbHostName(DB_PROD_HOST), dbHostPort(DB_PROD_HOST),
-                DB_PROD_USER,
-                DB_PROD_PASS,
-                escapeshellarg($database),
-                escapeshellarg($backupFile)
-            );
-        }
-
-        // Execute backup
-        exec($command, $output, $returnCode);
-
-        if ($returnCode !== 0) {
-            throw new Exception("Backup failed with return code $returnCode. Output: " . implode("\n", $output));
-        }
-
-        // Check if file was created
-        if (!file_exists($backupFile)) {
-            throw new Exception("Backup file was not created");
-        }
-
-        $fileSize = filesize($backupFile);
-        if ($fileSize === 0) {
-            throw new Exception("Backup file is empty");
-        }
+        $backupFile = $backup['filepath'];
 
         // Read first 50 lines for preview
         $preview = '';
@@ -267,9 +169,9 @@ function testBackup() {
 
         sendSuccess([
             'backupFile' => $backupFile,
-            'fileSize' => formatFileSize($fileSize),
-            'timestamp' => date('Y-m-d H:i:s'),
-            'command' => str_replace(DB_PROD_PASS, '****', $command), // Hide password
+            'fileSize' => $backup['fileSize'],
+            'timestamp' => $backup['timestamp'],
+            'command' => $backup['command'], // holds no password
             'preview' => $preview
         ]);
 
@@ -304,7 +206,7 @@ function listBackups() {
             $backups[] = [
                 'filename' => $file,
                 'filepath' => $filepath,
-                'size' => formatFileSize($size),
+                'size' => formatBackupFileSize($size),
                 'sizeBytes' => $size,
                 'created' => date('Y-m-d H:i:s', filemtime($filepath))
             ];
@@ -317,7 +219,7 @@ function listBackups() {
 
         sendSuccess([
             'backups' => $backups,
-            'totalSize' => formatFileSize($totalSize)
+            'totalSize' => formatBackupFileSize($totalSize)
         ]);
 
     } catch (Exception $e) {
@@ -357,46 +259,5 @@ function deleteBackup() {
     }
 }
 
-/**
- * Find mysqldump executable
- */
-function findMysqldump() {
-    // Use the configured path from config.php
-    if (defined('MYSQLDUMP_PATH') && file_exists(MYSQLDUMP_PATH)) {
-        return MYSQLDUMP_PATH;
-    }
 
-    // Fallback: try to find it
-    $possiblePaths = [
-        'C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysqldump.exe',
-        'C:\\Program Files\\MySQL\\MySQL Server 5.7\\bin\\mysqldump.exe',
-        'mysqldump',
-    ];
-
-    foreach ($possiblePaths as $path) {
-        $output = [];
-        $returnCode = 0;
-        @exec('"' . $path . '" --version 2>&1', $output, $returnCode);
-        if ($returnCode === 0 && !empty($output)) {
-            return $path;
-        }
-    }
-
-    return null;
-}
-
-/**
- * Format file size
- */
-function formatFileSize($bytes) {
-    if ($bytes >= 1073741824) {
-        return number_format($bytes / 1073741824, 2) . ' GB';
-    } elseif ($bytes >= 1048576) {
-        return number_format($bytes / 1048576, 2) . ' MB';
-    } elseif ($bytes >= 1024) {
-        return number_format($bytes / 1024, 2) . ' KB';
-    } else {
-        return $bytes . ' bytes';
-    }
-}
 ?>

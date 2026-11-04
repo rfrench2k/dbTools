@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/config.php';   // BACKUP_DIR, dbtoolsServer()
+
 // Debug: Log that we reached index.php
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
@@ -98,14 +100,14 @@ include $headerFile;
                                     <span class="badge bg-success">Active</span>
                                 </div>
                                 <p class="card-text">
-                                    Make a one-off backup of a database to d:\dumps\ with proper mysqldump flags (stored
+                                    Make a one-off backup of a database to <?php echo htmlspecialchars(BACKUP_DIR); ?> with proper mysqldump flags (stored
                                     procedures, triggers, all objects). The automatic nightly backup is separate: see
                                     <a href="nightly-backup.php">Nightly Backup</a>.
                                 </p>
                                 <ul class="list-unstyled small">
                                     <li><strong>✓</strong> Full database backup with all objects</li>
                                     <li><strong>✓</strong> Proper flags: --routines, --triggers, --single-transaction</li>
-                                    <li><strong>✓</strong> Backup location: d:\dumps\</li>
+                                    <li><strong>✓</strong> Backup location: <?php echo htmlspecialchars(BACKUP_DIR); ?></li>
                                 </ul>
                                 <a href="backup-tool.php" class="btn btn-success mt-3"><i class="bi bi-download"></i> Open Backup Tool</a>
                                 <a href="test-backup.php" class="btn btn-outline-success mt-2 w-100"><i class="bi bi-gear"></i> Test Backup System</a>
@@ -248,7 +250,7 @@ include $headerFile;
         <div class="mt-5 text-center text-muted">
             <p class="small">
                 <strong>Environment Info:</strong><br>
-                TEST: localhost | PROD: <?php echo defined('DB_PROD_HOST') ? htmlspecialchars(DB_PROD_HOST) : 'see config.php'; ?>
+                <?php $server = dbtoolsServer(); echo htmlspecialchars($server['label'] . ' (' . $server['host'] . ':' . $server['port'] . ')'); ?>
             </p>
         </div>
     </div>

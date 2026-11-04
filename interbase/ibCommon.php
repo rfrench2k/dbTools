@@ -8,6 +8,15 @@ function ib_escape_arg(string $value): string
     return "\"" . str_replace("\"", "\\\"", $value) . "\"";
 }
 
+/** A restore target: a plain local path to a .ib/.gdb file (letters, digits, space, _ - . \ only; no ..). */
+function ib_restore_check_target(string $path): string
+{
+    if (!preg_match('/^[A-Za-z]:\\\\[A-Za-z0-9 _\-.\\\\]+\.(ib|gdb)$/i', $path) || strpos($path, '..') !== false) {
+        throw new InvalidArgumentException('Target path must be a local .ib or .gdb file path.');
+    }
+    return $path;
+}
+
 const IB_CONFIG_CACHE_KEY = '__ib_config_cache__';
 
 /**

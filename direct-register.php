@@ -3,11 +3,11 @@
  * Direct database registration for DBTOOLS
  */
 
-require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/common-dbfunctions.php';
 
 try {
-    $pdo = new PDO('mysql:host=' . DB_TEST_HOST . ';dbname=auth_db', DB_TEST_USER, DB_TEST_PASS);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $server = dbtoolsServer();
+    $pdo = getEnvConnection(DBTOOLS_ENV, 'auth_db');
 
     // Check if exists
     $stmt = $pdo->prepare("SELECT program_id FROM programs WHERE program_id = 'DBTOOLS'");
@@ -31,7 +31,7 @@ try {
         )
     ");
 
-    $stmt->execute([DB_TEST_HOST, DB_TEST_USER, DB_TEST_PASS]);
+    $stmt->execute([$server['host'] . ':' . $server['port'], $server['user'], $server['pass']]);
     echo "SUCCESS: DBTOOLS registered\n";
 
 } catch (Exception $e) {

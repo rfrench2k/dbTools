@@ -16,20 +16,9 @@ require_once __DIR__ . '/config.php';
 // Use database list from config.php
 $databasesToBackup = $DATABASES_TO_BACKUP;
 
-// Determine which server to backup based on environment
-if (APP_ENV === 'prod') {
-    // PRODUCTION: Backup the production server
-    $backupHost = DB_PROD_HOST;
-    $backupUser = DB_PROD_USER;
-    $backupPass = DB_PROD_PASS;
-    $envLabel = 'Prod';
-} else {
-    // DEVELOPMENT: Backup the local test server
-    $backupHost = DB_TEST_HOST;
-    $backupUser = DB_TEST_USER;
-    $backupPass = DB_TEST_PASS;
-    $envLabel = 'Dev';
-}
+// The one server (config.php environment table)
+$backupServer = dbtoolsServer();
+$envLabel = (APP_ENV === 'prod') ? 'Prod' : 'Dev';
 
 // Base backup directory (from config.php)
 $baseBackupDir = BACKUP_DIR;
@@ -38,9 +27,7 @@ $baseBackupDir = BACKUP_DIR;
 $databases = [];
 foreach ($databasesToBackup as $dbName) {
     $databases[$dbName] = [
-        'host' => $backupHost,
-        'user' => $backupUser,
-        'password' => $backupPass,
+        'server' => $backupServer,
         'backupDir' => $baseBackupDir . $dbName . '\\',
         'filenamePrefix' => $dbName . '-' . $envLabel,
         'enabled' => true

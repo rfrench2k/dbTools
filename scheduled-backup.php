@@ -64,13 +64,11 @@ foreach ($config['databases'] as $dbName => $dbConfig) {
     }
 
     // Create backup
-    echo "  Host: {$dbConfig['host']}\n";
+    echo "  Host: {$dbConfig['server']['host']}:{$dbConfig['server']['port']}\n";
     echo "  Backup Directory: {$dbConfig['backupDir']}\n";
 
     $result = createDatabaseBackup(
-        $dbConfig['host'],
-        $dbConfig['user'],
-        $dbConfig['password'],
+        $dbConfig['server'],
         $dbName,
         $dbConfig['backupDir'],
         $dbConfig['filenamePrefix']

@@ -14,6 +14,8 @@ if (!isset($_SERVER['DOCUMENT_ROOT'])) {
 require_once $_SERVER['DOCUMENT_ROOT'] . '/auth/includes/auth_functions.php';
 require_once __DIR__ . '/config.php';
 
+$server = dbtoolsServer();
+
 echo "==========================================================\n";
 echo "DBTOOLS Program Registration\n";
 echo "==========================================================\n\n";
@@ -66,7 +68,7 @@ try {
             )
         ");
 
-        $stmt->execute([DB_TEST_HOST, DB_TEST_USER, DB_TEST_PASS]);
+        $stmt->execute([$server['host'] . ':' . $server['port'], $server['user'], $server['pass']]);
         echo "SUCCESS: DBTOOLS program registered!\n\n";
     }
 

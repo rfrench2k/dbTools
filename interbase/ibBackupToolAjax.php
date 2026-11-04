@@ -1,6 +1,7 @@
 <?php
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/dbtools/common/common.php';
+dbtoolsRequireAction();   // SUPERADMIN, from DB Tools' own pages only
 require_once __DIR__ . '/ibCommon.php';
 
 header('Content-Type: application/json');

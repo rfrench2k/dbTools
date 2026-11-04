@@ -4,6 +4,7 @@
  */
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/dbtools/common/common.php';
+dbtoolsRequireAction();   // SUPERADMIN, from DB Tools' own pages only
 
 header('Content-Type: application/json');
 
@@ -29,7 +30,7 @@ try {
     }
 
     // Connect to TEST environment to get CREATE statements
-    $testPdo = getTestConnection();
+    $testPdo = getEnvConnection(DBTOOLS_ENV);
 
     // Initialize plan
     $plan = [

@@ -6,6 +6,7 @@
  */
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/dbtools/common/common.php';
+dbtoolsRequireAction();   // SUPERADMIN, from DB Tools' own pages only
 
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
@@ -174,21 +175,6 @@ function replicateDatabase() {
     $startTime = microtime(true);
     $steps = [];
 
-    // Get version-specific tools
-    $mysqldumpPath = getMysqldumpPath($sourceEnvId);
-    $mysqlPath = getMysqlPath($targetEnvId);
-
-    if (!$mysqldumpPath || !file_exists($mysqldumpPath)) {
-        $mysqldumpPath = findMysqldumpExecutable();
-    }
-    if (!$mysqlPath || !file_exists($mysqlPath)) {
-        $mysqlPath = defined('MYSQL_PATH') ? MYSQL_PATH : 'mysql';
-    }
-
-    if (!$mysqldumpPath) {
-        throw new Exception("mysqldump not found");
-    }
-
     // Create short labels for filenames
     $sourceLabel = preg_replace('/[^a-zA-Z0-9]/', '', $sourceEnv['label']);
     $targetLabel = preg_replace('/[^a-zA-Z0-9]/', '', $targetEnv['label']);
@@ -196,16 +182,7 @@ function replicateDatabase() {
     // Step 1: Backup target database first (safety)
     $steps[] = ['message' => "Creating backup of {$targetEnv['label']} database...", 'success' => false];
 
-    $targetBackupResult = createDatabaseBackupWithPath(
-        $targetEnv['host'],
-        $targetEnv['user'],
-        $targetEnv['pass'],
-        $database,
-        BACKUP_DIR,
-        "{$database}-{$targetLabel}-BeforeReplication",
-        $targetEnv['port'],
-        $mysqldumpPath
-    );
+    $targetBackupResult = createDatabaseBackup($targetEnv, $database, BACKUP_DIR, "{$database}-{$targetLabel}-BeforeReplication");
 
     if ($targetBackupResult['success']) {
         $steps[count($steps) - 1]['success'] = true;
@@ -218,16 +195,7 @@ function replicateDatabase() {
     // Step 2: Create dump from source
     $steps[] = ['message' => "Creating dump from {$sourceEnv['label']} database...", 'success' => false];
 
-    $sourceBackupResult = createDatabaseBackupWithPath(
-        $sourceEnv['host'],
-        $sourceEnv['user'],
-        $sourceEnv['pass'],
-        $database,
-        BACKUP_DIR,
-        "{$database}-{$sourceLabel}-ForReplication",
-        $sourceEnv['port'],
-        $mysqldumpPath
-    );
+    $sourceBackupResult = createDatabaseBackup($sourceEnv, $database, BACKUP_DIR, "{$database}-{$sourceLabel}-ForReplication");
 
     if ($sourceBackupResult['success']) {
         $steps[count($steps) - 1]['success'] = true;
@@ -251,19 +219,15 @@ function replicateDatabase() {
     // Step 4: Import source dump into target
     $steps[] = ['message' => "Importing {$sourceEnv['label']} data into {$targetEnv['label']}...", 'success' => false];
 
-    $command = sprintf(
-        '"%s" -h%s -P%d -u%s -p%s < %s 2>nul',
-        $mysqlPath,
+    $args = sprintf(
+        '-h%s -P%d -u%s < %s 2>nul',
         $targetEnv['host'],
         $targetEnv['port'],
         $targetEnv['user'],
-        $targetEnv['pass'],
         escapeshellarg($sourceDumpFile)
     );
 
-    $output = [];
-    $returnCode = 0;
-    exec($command, $output, $returnCode);
+    dbtoolsRunMysqlTool(MYSQL_PATH, $targetEnv['pass'], $args, $output, $returnCode);
 
     if ($returnCode !== 0) {
         $errorMsg = implode("\n", $output);

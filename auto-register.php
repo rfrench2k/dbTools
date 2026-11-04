@@ -11,6 +11,8 @@ if (!isset($_SERVER['DOCUMENT_ROOT'])) {
 require_once $_SERVER['DOCUMENT_ROOT'] . '/auth/admin/common/admin_functions.php';
 require_once __DIR__ . '/config.php';
 
+$server = dbtoolsServer();
+
 $data = [
     'program_id' => 'DBTOOLS',
     'program_name' => 'Database Management Tools',
@@ -18,10 +20,10 @@ $data = [
     'default_start_page' => '/dbtools/index.php',
     'cookie_prefix' => 'DBTOOLS',
     'cookie_duration_days' => 30,
-    'db_host' => DB_TEST_HOST,
+    'db_host' => $server['host'] . ':' . $server['port'],
     'db_name' => 'auth_db',
-    'db_user' => DB_TEST_USER,
-    'db_password' => DB_TEST_PASS,
+    'db_user' => $server['user'],
+    'db_password' => $server['pass'],
     'enabled' => 1
 ];
 

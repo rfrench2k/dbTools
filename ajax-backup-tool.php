@@ -6,6 +6,7 @@
  */
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/dbtools/common/common.php';
+dbtoolsRequireAction();   // SUPERADMIN, from DB Tools' own pages only
 
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
@@ -63,27 +64,8 @@ function checkSystemStatus() {
         $backupDirWritable = is_writable(BACKUP_DIR);
     }
 
-    // Find mysqldump for the specific environment's MySQL version
-    $mysqldumpAvailable = false;
-    $mysqldumpPath = null;
-
-    if ($envId) {
-        $env = getEnvironment($envId);
-        if ($env) {
-            $mysqldumpPath = getMysqldumpPath($envId);
-            if ($mysqldumpPath && file_exists($mysqldumpPath)) {
-                $mysqldumpAvailable = true;
-            }
-        }
-    }
-
-    // Fallback to default mysqldump finder
-    if (!$mysqldumpPath) {
-        $mysqldumpPath = findMysqldumpExecutable();
-        if ($mysqldumpPath) {
-            $mysqldumpAvailable = true;
-        }
-    }
+    $mysqldumpPath = MYSQLDUMP_PATH;
+    $mysqldumpAvailable = file_exists($mysqldumpPath);
 
     // Test environment connection
     $envConnection = [
@@ -91,28 +73,20 @@ function checkSystemStatus() {
         'label' => ''
     ];
 
-    if ($envId) {
-        $env = getEnvironment($envId);
-        if ($env) {
-            $envConnection['label'] = $env['label'];
-            try {
-                $pdo = getEnvConnection($envId);
-                $envConnection['success'] = true;
-            } catch (Exception $e) {
-                $envConnection['error'] = $e->getMessage();
-            }
-        } else {
-            $envConnection['error'] = "Unknown environment: $envId";
-        }
-    } else {
-        // Legacy: test PROD connection if no env specified
+    if (!$envId) {
+        $envId = DBTOOLS_ENV;
+    }
+    $env = getEnvironment($envId);
+    if ($env) {
+        $envConnection['label'] = $env['label'];
         try {
-            $prodPdo = getProdConnection();
+            $pdo = getEnvConnection($envId);
             $envConnection['success'] = true;
-            $envConnection['label'] = 'PROD (Legacy)';
         } catch (Exception $e) {
             $envConnection['error'] = $e->getMessage();
         }
+    } else {
+        $envConnection['error'] = "Unknown environment: $envId";
     }
 
     sendSuccess([
@@ -146,23 +120,11 @@ function createBackup() {
         throw new Exception("Unknown environment: $envId");
     }
 
-    // Get the mysqldump path for this environment's MySQL version
-    $mysqldumpPath = getMysqldumpPath($envId);
-
     // Create a short label for the filename (remove spaces and special chars)
     $envLabel = preg_replace('/[^a-zA-Z0-9]/', '', $env['label']);
 
     // Use shared backup library function with environment-specific settings
-    $result = createDatabaseBackupWithPath(
-        $env['host'],
-        $env['user'],
-        $env['pass'],
-        $database,
-        BACKUP_DIR,
-        "{$database}-{$envLabel}",  // filename prefix
-        $env['port'],
-        $mysqldumpPath
-    );
+    $result = createDatabaseBackup($env, $database, BACKUP_DIR, "{$database}-{$envLabel}");
 
     if ($result['success']) {
         $result['environment'] = $env['label'];
@@ -208,5 +170,5 @@ function listBackupFiles() {
     sendSuccess(['backups' => $backups]);
 }
 
-// Note: findMysqldumpExecutable() and formatBackupFileSize() are now in backup-lib.php
+// Note: formatBackupFileSize() is in backup-lib.php
 ?>

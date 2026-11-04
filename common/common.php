@@ -30,6 +30,22 @@ function getCurrentUserId() {
     return $currentUserId;
 }
 
+/**
+ * Every DB Tools action (ajax-*.php, interbase/*Ajax.php): SUPERADMIN only, and only from DB Tools' own pages
+ * (their jQuery calls send X-Requested-With; another site cannot, so a page elsewhere can't fire these through
+ * the browser of a signed-in owner). Answers 401/403 JSON and stops.
+ */
+function dbtoolsRequireAction(): void {
+    if (php_sapi_name() === 'cli') return;
+    $level = $GLOBALS['sessionUser']['user_level'] ?? '';
+    $fromPage = ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
+    if (!getCurrentUserId() || !auth_checkPermissionLevel($level, 'SUPERADMIN') || !$fromPage) {
+        if (!headers_sent()) { header('Content-Type: application/json'); http_response_code(getCurrentUserId() ? 403 : 401); }
+        echo json_encode(['success' => false, 'error' => getCurrentUserId() ? 'Not allowed' : 'Not authenticated']);
+        exit;
+    }
+}
+
 // Include database functions
 require_once __DIR__ . '/../common-dbfunctions.php';
 ?>

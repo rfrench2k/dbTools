@@ -8,6 +8,35 @@
 require_once __DIR__ . '/config.php';
 
 /**
+ * Run mysqldump/mysql with the password in a temporary option file (never on the command line).
+ * Runs: "<exe>" --defaults-extra-file="<temp file>" <args>; the file is deleted right after.
+ *
+ * @param string $exe      Path to mysqldump.exe / mysql.exe
+ * @param string $password Database password
+ * @param string $args     Everything after the program (already escaped), incl. redirects
+ * @return string The command that ran (holds no password)
+ */
+function dbtoolsRunMysqlTool($exe, $password, $args, &$output = null, &$returnCode = null) {
+    $optFile = tempnam(sys_get_temp_dir(), 'dbt');
+    if ($optFile === false) {
+        throw new Exception("Cannot create temporary option file");
+    }
+    try {
+        $value = str_replace(['\\', '"'], ['\\\\', '\\"'], $password);
+        if (file_put_contents($optFile, "[client]\npassword=\"" . $value . "\"\n") === false) {
+            throw new Exception("Cannot write temporary option file");
+        }
+        $command = sprintf('"%s" --defaults-extra-file="%s" %s', $exe, $optFile, $args);
+        $output = [];
+        $returnCode = 0;
+        exec($command, $output, $returnCode);
+        return $command;
+    } finally {
+        @unlink($optFile);
+    }
+}
+
+/**
  * Get PDO connection to a specific environment by ID
  *
  * @param string $envId Environment ID (e.g., '95-local')
@@ -31,40 +60,6 @@ function getEnvConnection($envId, $dbname = null) {
         return $pdo;
     } catch(PDOException $e) {
         throw new Exception("Connection to {$env['label']} failed: " . $e->getMessage());
-    }
-}
-
-/**
- * Get PDO connection to TEST environment (LEGACY - for backward compatibility)
- */
-function getTestConnection($dbname = null) {
-    try {
-        $dsn = "mysql:host=" . DB_TEST_HOST;
-        if ($dbname) {
-            $dsn .= ";dbname=" . $dbname;
-        }
-        $pdo = new PDO($dsn, DB_TEST_USER, DB_TEST_PASS);
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        return $pdo;
-    } catch(PDOException $e) {
-        throw new Exception("TEST connection failed: " . $e->getMessage());
-    }
-}
-
-/**
- * Get PDO connection to PROD environment (LEGACY - for backward compatibility)
- */
-function getProdConnection($dbname = null) {
-    try {
-        $dsn = "mysql:host=" . DB_PROD_HOST;
-        if ($dbname) {
-            $dsn .= ";dbname=" . $dbname;
-        }
-        $pdo = new PDO($dsn, DB_PROD_USER, DB_PROD_PASS);
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        return $pdo;
-    } catch(PDOException $e) {
-        throw new Exception("PROD connection failed: " . $e->getMessage());
     }
 }
 

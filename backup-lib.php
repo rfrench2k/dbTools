@@ -8,45 +8,22 @@
  */
 
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/common-dbfunctions.php';   // dbtoolsRunMysqlTool()
 
 /**
- * Create a complete database backup
+ * Create a complete database backup with MYSQLDUMP_PATH
  *
- * @param string $host Database host
- * @param string $user Database username
- * @param string $password Database password
- * @param string $database Database name
- * @param string $backupDir Directory to save backup
+ * @param array  $env            Server from $DB_ENVIRONMENTS (host, port, user, pass)
+ * @param string $database       Database name
+ * @param string $backupDir      Directory to save backup
  * @param string $filenamePrefix Prefix for backup filename (e.g., "DatabaseName-Prod")
+ * @param array  $tables         Only these tables (no CREATE/DROP DATABASE); empty = the whole database
  * @return array Result with success status, filepath, filesize, etc.
  */
-function createDatabaseBackup($host, $user, $password, $database, $backupDir, $filenamePrefix = null) {
-    return createDatabaseBackupWithPath($host, $user, $password, $database, $backupDir, $filenamePrefix, 3307, null);
-}
-
-/**
- * Create a complete database backup with custom port and mysqldump path
- *
- * @param string $host Database host
- * @param string $user Database username
- * @param string $password Database password
- * @param string $database Database name
- * @param string $backupDir Directory to save backup
- * @param string $filenamePrefix Prefix for backup filename (e.g., "DatabaseName-Prod")
- * @param int $port Database port (default 3307 = MySQL 9.5)
- * @param string|null $mysqldumpPath Path to mysqldump executable (null to auto-detect)
- * @return array Result with success status, filepath, filesize, etc.
- */
-function createDatabaseBackupWithPath($host, $user, $password, $database, $backupDir, $filenamePrefix = null, $port = 3307, $mysqldumpPath = null) {
-    if (strpos($host, ":") !== false) { [$host, $port] = explode(":", $host, 2); $port = (int)$port; }   // "localhost:3307"
+function createDatabaseBackup(array $env, $database, $backupDir, $filenamePrefix = null, array $tables = []) {
     try {
-        // Find mysqldump
-        $mysqldump = $mysqldumpPath;
-        if (!$mysqldump || !file_exists($mysqldump)) {
-            $mysqldump = findMysqldumpExecutable();
-        }
-        if (!$mysqldump) {
-            throw new Exception("mysqldump not found. Please install MySQL client tools.");
+        if (!file_exists(MYSQLDUMP_PATH)) {
+            throw new Exception("mysqldump not found at MYSQLDUMP_PATH (config.php): " . MYSQLDUMP_PATH);
         }
 
         // Ensure backup directory exists
@@ -70,26 +47,26 @@ function createDatabaseBackupWithPath($host, $user, $password, $database, $backu
         // --triggers: Include triggers
         // --single-transaction: Consistent snapshot for InnoDB without locking tables
         // --lock-tables=false: Don't lock tables (safe with single-transaction)
-        // --add-drop-database: Add DROP DATABASE before CREATE DATABASE
-        // --databases: Include CREATE DATABASE statement
+        // --add-drop-database: Add DROP DATABASE before CREATE DATABASE (whole database only)
+        // --databases: Include CREATE DATABASE statement (whole database only)
+        // Tables given: "database table1 table2" instead
         // --port: Specify the port (important for multi-version MySQL)
         // --set-gtid-purged=OFF: Exclude GTID info (avoids conflicts when importing to different server)
         // Note: Using 2>nul to discard warnings (prevents them from corrupting SQL file)
-        $command = sprintf(
-            '"%s" -h%s -P%d -u%s -p%s --routines --triggers --single-transaction --lock-tables=false --add-drop-database --set-gtid-purged=OFF --databases %s > %s 2>nul',
-            $mysqldump,
-            $host,
-            $port,
-            $user,
-            $password,
-            escapeshellarg($database),
+        $what = $tables
+            ? escapeshellarg($database) . ' ' . implode(' ', array_map('escapeshellarg', $tables))
+            : '--add-drop-database --databases ' . escapeshellarg($database);
+        $args = sprintf(
+            '-h%s -P%d -u%s --routines --triggers --single-transaction --lock-tables=false --set-gtid-purged=OFF %s > %s 2>nul',
+            $env['host'],
+            $env['port'],
+            $env['user'],
+            $what,
             escapeshellarg($filepath)
         );
 
-        // Execute backup
-        $output = [];
-        $returnCode = 0;
-        exec($command, $output, $returnCode);
+        // Execute backup (password goes in a temporary option file)
+        $command = dbtoolsRunMysqlTool(MYSQLDUMP_PATH, $env['pass'], $args, $output, $returnCode);
 
         if ($returnCode !== 0) {
             $errorMsg = implode("\n", $output);
@@ -115,7 +92,7 @@ function createDatabaseBackupWithPath($host, $user, $password, $database, $backu
             'fileSize' => formatBackupFileSize($fileSize),
             'fileSizeBytes' => $fileSize,
             'timestamp' => date('Y-m-d H:i:s'),
-            'command' => str_replace($password, '****', $command) // Hide password
+            'command' => $command // holds no password
         ];
 
     } catch (Exception $e) {
@@ -125,42 +102,6 @@ function createDatabaseBackupWithPath($host, $user, $password, $database, $backu
             'database' => $database
         ];
     }
-}
-
-/**
- * Find mysqldump executable
- *
- * @return string|null Path to mysqldump or null if not found
- */
-function findMysqldumpExecutable() {
-    // Use configured path from config.php
-    if (defined('MYSQLDUMP_PATH') && file_exists(MYSQLDUMP_PATH)) {
-        return MYSQLDUMP_PATH;
-    }
-
-    // Fallback: try to find it (check both MySQL versions)
-    $possiblePaths = [
-        'C:\\Program Files\\MySQL\\MySQL Server 9.5\\bin\\mysqldump.exe',
-        'C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysqldump.exe',
-        'C:\\Program Files\\MySQL\\MySQL Server 5.7\\bin\\mysqldump.exe',
-        'mysqldump',
-    ];
-
-    foreach ($possiblePaths as $path) {
-        if (file_exists($path)) {
-            return $path;
-        }
-    }
-
-    // Last resort: try to execute mysqldump from PATH
-    $output = [];
-    $returnCode = 0;
-    @exec('mysqldump --version 2>&1', $output, $returnCode);
-    if ($returnCode === 0 && !empty($output)) {
-        return 'mysqldump';
-    }
-
-    return null;
 }
 
 /**
